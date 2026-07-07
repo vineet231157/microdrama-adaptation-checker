@@ -59,14 +59,19 @@ def format_task(self, task_id: str, input_path: str, show_title: str = ""):
                            f"readability {r['readability']}/5.")
         files = [Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])]
 
-        # Stage 2 — director-ready enrichment (only if a Gemini key is configured).
+        # Stage 2 — director-ready enrichment (only if a key is set; NEVER fatal —
+        # the fast formatted PDF is always delivered even if enrichment fails).
         if settings.GEMINI_API_KEY:
-            from .pipeline import enrich_director_ready
-            base = Path(out["pdf"]).stem.replace("_formatted", "")
-            corrected = Path(out["corrected"]).read_text(encoding="utf-8")
-            den = enrich_director_ready.run(task_id, corrected, wd,
-                                            show_title or base.replace("_", " ").title(), base=base)
-            files = [Path(den["director_pdf"]), Path(den["bible_md"])] + files
+            try:
+                from .pipeline import enrich_director_ready
+                base = Path(out["pdf"]).stem.replace("_formatted", "")
+                corrected = Path(out["corrected"]).read_text(encoding="utf-8")
+                den = enrich_director_ready.run(task_id, corrected, wd,
+                                                show_title or base.replace("_", " ").title(), base=base)
+                files = [Path(den["director_pdf"]), Path(den["bible_md"])] + files
+            except Exception as e:
+                state.log(task_id, f"Director-ready enrichment skipped ({e}); "
+                                   f"formatted PDF still delivered.", level="error")
 
         out_zip = wd / "Formatted.zip"
         zip_files(files, out_zip)

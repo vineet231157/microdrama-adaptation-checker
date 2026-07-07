@@ -239,6 +239,7 @@ with tab_fmt:
         if not f_file:
             st.error("Upload a script file.")
         else:
+            # ── Stage 1 — fast deterministic formatting (always delivered) ──
             try:
                 from app.pipeline import model4_formatter
                 from app.pipeline.textextract import extract_text
@@ -250,50 +251,57 @@ with tab_fmt:
                     txt = wd / f"{src.stem}.txt"
                     txt.write_text(extract_text(src), encoding="utf-8")
                     src = txt
-
-                with st.spinner("Stage 1 — checking & formatting…"):
+                with st.spinner("Formatting…"):
                     out = model4_formatter.run(str(src), outdir=str(wd))
                 r = out["result"]
-                files = [Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])]
-
-                director_pdf = None
-                if enrich and settings.GEMINI_API_KEY:
-                    from app.pipeline import enrich_director_ready
-                    base = Path(out["pdf"]).stem.replace("_formatted", "")
-                    corrected = Path(out["corrected"]).read_text(encoding="utf-8")
-                    with st.spinner("Stage 2 — director-ready enrichment (AI)… this can take a "
-                                    "few minutes on long scripts."):
-                        # tiny inline progress bar via a status callback
-                        prog = st.progress(0.0)
-                        import app.state as _state
-                        _state.set_step = lambda t, s, l, p: prog.progress(min(p, 100) / 100.0)
-                        _state.log = lambda *a, **k: None
-                        _state.add_artifact = _state.set_drive_link = lambda *a, **k: None
-                        den = enrich_director_ready.run(
-                            "fmt", corrected, wd, f_title or base.replace("_", " ").title(), base=base)
-                        director_pdf = Path(den["director_pdf"])
-                        files = [director_pdf, den["bible_md"]] + files
-
-                zip_path = wd / "Formatted.zip"
-                zip_files(files, zip_path)
-
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Formatting", r["format_status"])
-                c2.metric("Episodes", r["n_episodes"])
-                c3.metric("Readability", f"{r['readability']}/5")
-                st.success("Done." + (" Director-ready PDF included." if director_pdf else ""))
-                if director_pdf and director_pdf.exists():
-                    st.download_button("⬇️ Director-Ready Screenplay (PDF)",
-                                       data=director_pdf.read_bytes(), file_name=director_pdf.name,
-                                       mime="application/pdf")
-                st.download_button("⬇️ Download everything (ZIP)",
-                                   data=zip_path.read_bytes(), file_name="Formatted.zip",
-                                   mime="application/zip")
-                with st.expander("Formatting report"):
-                    st.markdown(Path(out["report"]).read_text(encoding="utf-8"))
+                base = Path(out["pdf"]).stem.replace("_formatted", "")
             except Exception as e:
                 st.error(f"Formatting failed: {e}")
                 st.exception(e)
+                st.stop()
+
+            # Show + offer the fast result IMMEDIATELY.
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Formatting", r["format_status"])
+            c2.metric("Episodes", r["n_episodes"])
+            c3.metric("Readability", f"{r['readability']}/5")
+            st.success("✅ Formatted screenplay ready.")
+            st.download_button("⬇️ Formatted screenplay (PDF)",
+                               data=Path(out["pdf"]).read_bytes(),
+                               file_name=Path(out["pdf"]).name, mime="application/pdf")
+
+            files = [Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])]
+
+            # ── Stage 2 — director-ready enrichment (OPTIONAL, never fatal) ──
+            if enrich and settings.GEMINI_API_KEY:
+                try:
+                    from app.pipeline import enrich_director_ready
+                    corrected = Path(out["corrected"]).read_text(encoding="utf-8")
+                    prog = st.progress(0.0, text="Director-ready enrichment (AI)…")
+                    import app.state as _state
+                    _state.set_step = lambda t, s, l, p: prog.progress(min(p, 100) / 100.0, text=l)
+                    _state.log = lambda *a, **k: None
+                    _state.add_artifact = _state.set_drive_link = lambda *a, **k: None
+                    den = enrich_director_ready.run(
+                        "fmt", corrected, wd, f_title or base.replace("_", " ").title(), base=base)
+                    director_pdf = Path(den["director_pdf"])
+                    files = [director_pdf, Path(den["bible_md"])] + files
+                    prog.progress(1.0, text="Director-ready enrichment complete.")
+                    st.success("🎬 Director-ready screenplay ready.")
+                    st.download_button("⬇️ Director-Ready Screenplay (PDF)",
+                                       data=director_pdf.read_bytes(),
+                                       file_name=director_pdf.name, mime="application/pdf")
+                except Exception as e:
+                    st.warning(f"Director-ready enrichment couldn't finish ({e}). "
+                               f"Your formatted screenplay above is ready to use.")
+
+            zip_path = wd / "Formatted.zip"
+            zip_files(files, zip_path)
+            st.download_button("⬇️ Download everything (ZIP)",
+                               data=zip_path.read_bytes(), file_name="Formatted.zip",
+                               mime="application/zip")
+            with st.expander("Formatting report"):
+                st.markdown(Path(out["report"]).read_text(encoding="utf-8"))
 
 # ── Full Adaptation Checker (detached) ───────────────────────────────────────
 with tab_pipe:

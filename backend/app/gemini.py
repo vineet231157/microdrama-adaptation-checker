@@ -123,25 +123,29 @@ class GeminiSession:
         return json.loads(raw)
 
 
-def _model_chain(preferred: str) -> list[str]:
-    seen, out = set(), []
-    for m in [preferred, settings.GEMINI_MODEL, *settings.GEMINI_FALLBACKS]:
-        if m and m not in seen:
-            seen.add(m)
-            out.append(m)
-    return out
+# Fail-FAST retry for enrichment: a couple of quick retries on 429, then give up
+# (so a low-quota key can't make the whole job hang for minutes on backoff).
+_retry_fast = retry(
+    reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=20),
+    retry=retry_if_exception(_is_rate_limit),
+)
 
 
-@_retry
-def generate_text(preferred_model: str, system_instruction: str, contents,
+@_retry_fast
+def generate_text(models: list[str], system_instruction: str, contents,
                   *, temperature=0.5, max_output_tokens=8192) -> str:
-    """Stateless, retried, model-fallback generate — SAFE to call from many
-    threads at once (no shared mutable state). Used for concurrent enrichment.
-    """
+    """Stateless generate over an ORDERED model list — SAFE for concurrent
+    (multi-thread) calls (no shared mutable state). Used for enrichment.
+    ``models`` is tried in order; unavailable models are skipped, 429s retried
+    a few times then raised (fail fast, never hang)."""
     _configure()
     cfg = genai.types.GenerationConfig(temperature=temperature, max_output_tokens=max_output_tokens)
     last = None
-    for name in _model_chain(preferred_model):
+    for name in models:
+        if not name:
+            continue
         try:
             mdl = genai.GenerativeModel(name, system_instruction=system_instruction)
             return mdl.generate_content(contents, generation_config=cfg).text
@@ -149,8 +153,8 @@ def generate_text(preferred_model: str, system_instruction: str, contents,
             last = e
             if _is_unavailable(e):
                 continue
-            raise  # 429s bubble to @_retry
-    raise RuntimeError(f"All Gemini models failed. Last error: {last}")
+            raise  # 429s bubble to @_retry_fast
+    raise RuntimeError(f"All enrichment models failed. Last error: {last}")
 
 
 # ── Video File API helpers ────────────────────────────────────────────────

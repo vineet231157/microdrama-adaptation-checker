@@ -52,14 +52,15 @@ def run(task_id: str, corrected_text: str, workdir: Path, title: str,
     """Returns {'director_pdf', 'bible_md', 'markup'} or raises."""
     from .. import gemini  # lazy — AI SDK only needed here
 
-    model = settings.ENRICH_MODEL  # fast model (Flash) for this mechanical transform
+    # Fast, flash-only model chain — never falls back to a slow pro model.
+    models = [settings.ENRICH_MODEL, *settings.ENRICH_FALLBACKS]
     episodes = [(n, t) for (n, t) in split_episodes(corrected_text) if t.strip()]
     state.log(task_id, f"Director-ready enrichment: {len(episodes)} episode(s) "
-                       f"on {model}, {settings.ENRICH_CONCURRENCY} in parallel.")
+                       f"on {models[0]}, {settings.ENRICH_CONCURRENCY} in parallel.")
 
     # 1) Character Bible (continuity across episodes) — one quick call
     state.set_step(task_id, 2, "Building character bible…", 30)
-    bible = gemini.generate_text(model, ENRICH_SYSTEM_INSTRUCTION,
+    bible = gemini.generate_text(models, ENRICH_SYSTEM_INSTRUCTION,
                                  [build_bible_prompt(corrected_text[:_MAX_BIBLE_CHARS])],
                                  temperature=0.3, max_output_tokens=2048).strip()
     bible_md = workdir / f"{base}_character_bible.md"
@@ -68,7 +69,7 @@ def run(task_id: str, corrected_text: str, workdir: Path, title: str,
     # 2) Enrich every episode CONCURRENTLY → @-markup (order preserved on collect)
     def _one(item):
         ep_num, ep_text = item
-        markup = gemini.generate_text(model, ENRICH_SYSTEM_INSTRUCTION,
+        markup = gemini.generate_text(models, ENRICH_SYSTEM_INSTRUCTION,
                                       [build_enrich_prompt(ep_num, ep_text, bible)],
                                       temperature=0.5, max_output_tokens=8192)
         markup = _markup_only(markup)
