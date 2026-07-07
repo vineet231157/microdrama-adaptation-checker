@@ -8,7 +8,6 @@ episode so the frontend can download partial results.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from .. import state
@@ -43,8 +42,9 @@ def run(
     if max_episodes and max_episodes > 0:
         videos = videos[:max_episodes]
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_id = drive.get_or_create_subfolder(source_folder_id, f"Individual_Screenplays_{ts}")
+    # Create/reuse a "Screenplays" folder inside the source folder (matches the
+    # original notebook's OUTPUT_FOLDER_NAME).
+    out_id = drive.get_or_create_subfolder(source_folder_id, "Screenplays")
     state.set_drive_link(task_id, "screenplay_folder", DriveClient.folder_link(out_id))
 
     session = gemini.GeminiSession(SCREENPLAY_SYSTEM_INSTRUCTION)

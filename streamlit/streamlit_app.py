@@ -1,233 +1,179 @@
 """
 Microdrama Adaptation Checker — Streamlit front-end.
 
-A single-process alternative to the Next.js + FastAPI + Celery stack. It reuses
-the EXACT same pipeline modules (app.pipeline.step1..step5); it just runs them
-inline and streams progress into Streamlit widgets instead of Redis + SSE.
-
-Two modes:
-  • Formatting Only        — upload a script → formatted screenplay PDF (Model 4)
-  • Full Adaptation Checker — videos (drag-drop OR Drive) + Hindi script → SRTs,
-                              screenplays, master PDF, and an evaluation report.
+- **Formatting Only** runs INLINE and is fast (deterministic, no AI). Produces
+  the same 3 files as the notebook: <name>_formatted.pdf, _format_report.md,
+  _corrected.txt.
+- **Full Adaptation Checker** submits the job to a DETACHED background process
+  (job_runner.py). A 3–5 hour job keeps running even if you close the tab; it
+  writes results to Google Drive (SRT_Files/ + Screenplays/ folders) and to
+  local ZIPs. The **My Jobs** tab polls progress and serves the downloads.
 
 Run:  streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
-import traceback
+import time
 import uuid
 from pathlib import Path
 
 import streamlit as st
 
 # ── make the backend package importable ─────────────────────────────────────
-# Insert the streamlit dir first (for local_source), then BACKEND at index 0 so
-# the `app` package resolves to backend/app (the entry file is streamlit_app.py,
-# so there is no name collision with the `app` package).
 _HERE = Path(__file__).resolve().parent
 BACKEND = _HERE.parents[0] / "backend"
-sys.path.insert(0, str(_HERE))          # for `local_source`
-sys.path.insert(0, str(BACKEND))        # ends up first → `app.*` resolves here
+sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(BACKEND))
 
-from app.config import settings          # noqa: E402
-import app.state as state                # noqa: E402
+from app.config import settings  # noqa: E402
 
 st.set_page_config(page_title="Microdrama Adaptation Checker", page_icon="🎬", layout="wide")
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Redirect the pipeline's Redis-backed progress calls into live Streamlit UI.
-# The step modules call state.set_step/log/add_artifact/set_drive_link at run
-# time, so monkeypatching these module attributes is enough — no Redis needed.
-# ═══════════════════════════════════════════════════════════════════════════
-class _UI:
-    progress = None
-    caption = None
-    logbox = None
-    lines: list[str] = []
-
-
-def _set_step(task_id, step, label, percent):
-    if _UI.progress is not None:
-        _UI.progress.progress(min(max(percent, 0), 100) / 100.0)
-    if _UI.caption is not None:
-        _UI.caption.markdown(f"**Step {step}/5 — {label}**")
-
-
-def _log(task_id, msg, level="info"):
-    prefix = "❌ " if level == "error" else ""
-    _UI.lines.append(prefix + str(msg))
-    if _UI.logbox is not None:
-        _UI.logbox.code("\n".join(_UI.lines[-300:]), language="log")
-
-
-def _add_artifact(task_id, name, url):
-    st.session_state.setdefault("_artifacts", set()).add(name)
-
-
-def _set_drive_link(task_id, name, url):
-    if url and url.startswith("https://drive.google.com"):
-        st.session_state.setdefault("_drive", {})[name] = url
-
-
-def _noop(*a, **k):
-    return None
-
-
-state.set_step = _set_step
-state.log = _log
-state.add_artifact = _add_artifact
-state.set_drive_link = _set_drive_link
-state.create = _noop
-state.update = _noop
-state.finish = _noop
-state.fail = _noop
-state.get = lambda tid: None
+PIPELINE_STEPS = ["SRT extraction", "Screenplay", "Merge", "Format", "Evaluation"]
+ZIP_LABELS = [
+    ("SRT_Files.zip", "⬇️ SRTs (ZIP)"),
+    ("Screenplays.zip", "⬇️ Individual Screenplays (ZIP)"),
+    ("Final_Deliverables.zip", "⬇️ Master + Evaluation (ZIP)"),
+]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════
-def _workdir(task_id: str) -> Path:
-    d = settings.WORK_ROOT / task_id
+def workdir(job_id: str) -> Path:
+    d = settings.WORK_ROOT / job_id
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _save_upload(uploaded, dest: Path) -> Path:
+def save_upload(uploaded, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(uploaded.getbuffer())
     return dest
 
 
-def _fresh_run_state():
-    _UI.lines = []
-    st.session_state["_artifacts"] = set()
-    st.session_state["_drive"] = {}
+def launch_detached_job(spec: dict):
+    """Write the spec and spawn job_runner.py as an independent process."""
+    wd = Path(spec["workdir"])
+    spec_path = wd / "job.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "GEMINI_API_KEY": settings.GEMINI_API_KEY or "",
+        "GEMINI_MODEL": settings.GEMINI_MODEL,
+        "OCR_USE_GPU": "true" if settings.OCR_USE_GPU else "false",
+        "WORK_ROOT": str(settings.WORK_ROOT),
+    }
+    log_f = open(wd / "runner.log", "ab")
+    # start_new_session=True detaches from Streamlit's process group so the job
+    # survives the UI session ending / the tab closing.
+    subprocess.Popen(
+        [sys.executable, str(_HERE / "job_runner.py"), "--spec", str(spec_path)],
+        stdout=log_f, stderr=log_f, start_new_session=True, env=env,
+    )
 
 
-def _download_button(label: str, path: Path, mime="application/zip"):
-    if path.exists():
-        st.download_button(label, data=path.read_bytes(), file_name=path.name, mime=mime)
+def read_status(job_id: str) -> dict | None:
+    p = settings.WORK_ROOT / job_id / "status.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Pipeline runners (synchronous — mirror app.tasks but inline)
-# ═══════════════════════════════════════════════════════════════════════════
-def run_full_pipeline(source, source_folder_id, hindi_path, title, max_episodes):
-    from app.pipeline import (step1_srt, step2_screenplay, step3_merge,
-                              step4_format, step5_evaluate)
-    from app.zipper import zip_files
-
-    task_id = uuid.uuid4().hex
-    wd = _workdir(task_id)
-
-    s1 = step1_srt.run(task_id, source, source_folder_id, wd)
-    s2 = step2_screenplay.run(task_id, source, source_folder_id, s1["srts"],
-                              title, wd, max_episodes=max_episodes)
-    s3 = step3_merge.run(task_id, s2["episodes"], wd, title)
-    s4 = step4_format.run(task_id, s3["merged_md"], s3["merged_text"], wd, title)
-    source.upload(s4["master_pdf"], s4["master_pdf"].name, s2["folder_id"], "application/pdf")
-    s5 = step5_evaluate.run(task_id, hindi_path, s4["corrected_text"], wd, title)
-    source.upload(s5["report_pdf"], s5["report_pdf"].name, s2["folder_id"], "application/pdf")
-
-    zip_files([s4["master_pdf"], s5["report_pdf"], s5["report_json"]],
-              wd / "Final_Deliverables.zip")
-    _set_step(task_id, 5, "Complete", 100)
-    return {"id": task_id, "wd": str(wd), "mode": "pipeline", "title": title,
-            "eval": s5["data"], "drive": dict(st.session_state.get("_drive", {}))}
+def list_jobs() -> list[dict]:
+    root = settings.WORK_ROOT
+    if not root.exists():
+        return []
+    jobs = []
+    for d in root.iterdir():
+        s = read_status(d.name)
+        if s:
+            jobs.append(s)
+    jobs.sort(key=lambda s: s.get("started_at", 0), reverse=True)
+    return jobs
 
 
-def run_format(uploaded, title):
-    from app.pipeline import step4_format
-    from app.pipeline.textextract import extract_text
-    from app.zipper import zip_files
-
-    task_id = uuid.uuid4().hex
-    wd = _workdir(task_id)
-    src = _save_upload(uploaded, wd / uploaded.name)
-    title = title or src.stem.replace("_", " ").title()
-
-    if src.suffix.lower() in (".docx", ".txt"):
-        text = extract_text(src)
-        md_path = wd / f"{src.stem}.md"
-        md_path.write_text(text, encoding="utf-8")
-        merged_text = text
-    else:  # PDF — format_check extracts via pdftotext internally
-        md_path, merged_text = src, ""
-
-    result = step4_format.run(task_id, md_path, merged_text, wd, title)
-    zip_files([result["master_pdf"], result["corrected_txt"]], wd / "Formatted.zip")
-    _set_step(task_id, 4, "Complete", 100)
-    return {"id": task_id, "wd": str(wd), "mode": "format", "title": title,
-            "report": result["report"]}
+def download_row(job_dir: Path):
+    cols = st.columns(len(ZIP_LABELS))
+    for col, (fname, label) in zip(cols, ZIP_LABELS):
+        f = job_dir / fname
+        with col:
+            if f.exists():
+                st.download_button(label, data=f.read_bytes(), file_name=f.name,
+                                   mime="application/zip", key=f"dl_{job_dir.name}_{fname}")
+            else:
+                st.button(label, disabled=True, key=f"dl_{job_dir.name}_{fname}_off")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Results renderer (survives download-button reruns via session_state)
-# ═══════════════════════════════════════════════════════════════════════════
-def render_results(res: dict):
-    wd = Path(res["wd"])
-    st.success(f"✅ Done — “{res['title']}”")
+def render_job(s: dict):
+    job_id = s["job_id"]
+    job_dir = settings.WORK_ROOT / job_id
+    status = s.get("status", "running")
 
-    if res["mode"] == "format":
-        rep = res.get("report", {})
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Formatting", rep.get("format_status", "—"))
-        c2.metric("Episodes", rep.get("n_episodes", "—"))
-        c3.metric("Readability", f"{rep.get('readability','—')}/5")
-        _download_button("⬇️ Download Formatted Script (ZIP)", wd / "Formatted.zip")
-        return
+    top = st.columns([3, 1, 1])
+    top[0].markdown(f"**{s.get('show_title') or job_id}**  \n`{job_id}`")
+    top[1].metric("Status", status.upper())
+    started = s.get("started_at")
+    if started:
+        mins = (s.get("updated_at", time.time()) - started) / 60.0
+        top[2].metric("Elapsed", f"{mins:.0f} min")
 
-    ev = res.get("eval", {})
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Overall verdict", ev.get("overall_verdict", "—"))
-    c2.metric("Score", f"{ev.get('overall_score','—')}/100")
-    c3.metric("Genuine gaps", len(ev.get("information_gaps", []) or []))
-    if ev.get("summary"):
-        st.info(ev["summary"])
+    st.progress(min(max(s.get("percent", 0), 0), 100) / 100.0)
+    st.caption(f"Step {s.get('step', 0)}/5 — {s.get('step_label', '')}")
 
-    st.subheader("Deliverables")
-    cols = st.columns(3)
-    with cols[0]:
-        _download_button("⬇️ SRTs (ZIP)", wd / "SRT_Files.zip")
-    with cols[1]:
-        _download_button("⬇️ Individual Screenplays (ZIP)", wd / "Screenplays.zip")
-    with cols[2]:
-        _download_button("⬇️ Master + Evaluation (ZIP)", wd / "Final_Deliverables.zip")
+    if status == "error" and s.get("error"):
+        st.error(s["error"])
 
-    drive = res.get("drive", {})
+    # step tracker
+    cols = st.columns(5)
+    for i, name in enumerate(PIPELINE_STEPS, 1):
+        done = s.get("step", 0) > i or status == "done"
+        active = s.get("step", 0) == i and status == "running"
+        icon = "✅" if done else ("⏳" if active else "•")
+        cols[i - 1].markdown(f"{icon} **{i}**  \n{name}")
+
+    st.divider()
+    st.markdown("**Deliverables**")
+    download_row(job_dir)
+    drive = s.get("drive", {})
     if drive:
-        st.caption("On Google Drive:")
-        for name, url in drive.items():
-            st.markdown(f"- [{name.replace('_',' ').title()}]({url})")
+        links = "  ·  ".join(f"[{k.replace('_',' ').title()}]({v})" for k, v in drive.items())
+        st.caption("On Google Drive: " + links)
+
+    with st.expander("Live log", expanded=(status == "running")):
+        lines = [f"{l.get('msg','')}" for l in s.get("log", [])]
+        st.code("\n".join(lines[-300:]) or "…", language="log")
+
+    return status
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Sidebar — configuration
+# Sidebar
 # ═══════════════════════════════════════════════════════════════════════════
 st.sidebar.title("⚙️ Configuration")
-gemini_key = st.sidebar.text_input(
-    "Gemini API key", type="password",
-    value=settings.GEMINI_API_KEY, help="Used for screenplay generation + evaluation.",
-)
-if gemini_key:
-    settings.GEMINI_API_KEY = gemini_key
+
+# Streamlit Cloud secrets → settings
+if "GEMINI_API_KEY" in st.secrets and not settings.GEMINI_API_KEY:
+    settings.GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+
+key_in = st.sidebar.text_input("Gemini API key", type="password", value=settings.GEMINI_API_KEY,
+                               help="Needed for the Full pipeline (Steps 2 & 5). Not for Formatting.")
+if key_in:
+    settings.GEMINI_API_KEY = key_in
 settings.GEMINI_MODEL = st.sidebar.selectbox(
-    "Gemini model", ["gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash"],
-    index=0,
-)
+    "Gemini model", ["gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
 settings.OCR_USE_GPU = st.sidebar.toggle("Use GPU for OCR", value=settings.OCR_USE_GPU,
                                          help="Enable only on a CUDA host.")
 st.sidebar.divider()
-st.sidebar.caption("Tip: on Streamlit Cloud, put GEMINI_API_KEY in **Secrets** and it "
-                   "auto-fills above.")
-
-# Streamlit Cloud secrets → env
-if not gemini_key and "GEMINI_API_KEY" in st.secrets:
-    settings.GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+st.sidebar.caption(f"Workspace: `{settings.WORK_ROOT}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -236,106 +182,124 @@ if not gemini_key and "GEMINI_API_KEY" in st.secrets:
 st.title("🎬 Microdrama Adaptation Checker")
 st.caption("Chinese microdrama → Hindi director-ready screenplay, end to end.")
 
-# Re-render last results if present (keeps downloads alive across reruns).
-if "last_result" in st.session_state:
-    render_results(st.session_state["last_result"])
-    if st.button("Start a new job"):
-        del st.session_state["last_result"]
-        st.rerun()
-    st.stop()
+tab_fmt, tab_pipe, tab_jobs = st.tabs(
+    ["✨ Formatting Only", "🚀 Full Adaptation Checker", "📂 My Jobs"])
 
-tab_pipeline, tab_format = st.tabs(["🚀 Full Adaptation Checker", "✨ Formatting Only"])
-
-# ── Full pipeline ────────────────────────────────────────────────────────────
-with tab_pipeline:
-    st.write("Videos + your Hindi OG script → SRTs, screenplays, master PDF, and an "
-             "adaptation-review report.")
-    src_mode = st.radio("Video source", ["Upload video files", "Google Drive folder"],
-                        horizontal=True)
-
-    videos = drive_url = sa_info = None
-    if src_mode == "Upload video files":
-        videos = st.file_uploader("Episode videos (.mp4/.mkv/.mov)",
-                                  type=["mp4", "mkv", "mov", "webm", "avi"],
-                                  accept_multiple_files=True)
-    else:
-        drive_url = st.text_input("Google Drive folder link (raw videos)")
-        sa_file = st.file_uploader("Service-account key (JSON)", type=["json"],
-                                   help="Share the Drive folder with the service account's "
-                                        "client_email so it can read videos + write results.")
-        if sa_file:
-            sa_info = json.loads(sa_file.getvalue().decode("utf-8"))
-
-    col1, col2 = st.columns(2)
-    title = col1.text_input("Show title (optional)")
-    max_eps = col2.number_input("Max episodes (0 = all)", min_value=0, value=0, step=1)
-    hindi = st.file_uploader("Hindi OG script (PDF / DOCX / TXT)", type=["pdf", "docx", "txt"])
-
-    if st.button("▶️ Start Full Pipeline", type="primary"):
-        if not settings.GEMINI_API_KEY:
-            st.error("Enter your Gemini API key in the sidebar.")
-        elif not hindi:
-            st.error("Upload the Hindi OG script.")
-        elif src_mode == "Upload video files" and not videos:
-            st.error("Upload at least one video file.")
-        elif src_mode == "Google Drive folder" and not (drive_url and sa_info):
-            st.error("Provide the Drive link and the service-account JSON.")
-        else:
-            _fresh_run_state()
-            _UI.caption = st.empty()
-            _UI.progress = st.progress(0.0)
-            with st.expander("Live log", expanded=True):
-                _UI.logbox = st.empty()
-            try:
-                task_id = uuid.uuid4().hex
-                wd = _workdir(task_id)
-                hindi_path = str(_save_upload(hindi, wd / hindi.name))
-
-                if src_mode == "Upload video files":
-                    from local_source import LocalSource
-                    vids_dir = wd / "_input_videos"
-                    vids_dir.mkdir(parents=True, exist_ok=True)
-                    for v in videos:
-                        _save_upload(v, vids_dir / v.name)
-                    source = LocalSource(vids_dir, wd / "_local_out")
-                    source_folder_id = str(vids_dir)
-                    show_title = title or "Uploaded Show"
-                else:
-                    from app.drive import DriveClient, folder_id_from_url
-                    source = DriveClient.from_service_account_info(sa_info)
-                    source_folder_id = folder_id_from_url(drive_url)
-                    show_title = title or source.folder_name(source_folder_id)
-
-                with st.spinner("Running the 5-step pipeline… (this can take a while)"):
-                    res = run_full_pipeline(source, source_folder_id, hindi_path,
-                                            show_title, int(max_eps))
-                st.session_state["last_result"] = res
-                st.rerun()
-            except Exception as e:
-                st.error(f"Pipeline failed: {e}")
-                st.code(traceback.format_exc())
-
-# ── Formatting only ────────────────────────────────────────────────────────
-with tab_format:
-    st.write("Upload an unformatted script — get a cleanly formatted screenplay PDF "
-             "(deterministic, no AI).")
+# ── Formatting Only (inline, fast) ───────────────────────────────────────────
+with tab_fmt:
+    st.write("Upload an unformatted script → cleanly formatted screenplay PDF + a "
+             "formatting report. Deterministic, fast, no API key needed.")
     f_title = st.text_input("Title (optional)", key="fmt_title")
-    f_file = st.file_uploader("Script (PDF / DOCX / TXT)", type=["pdf", "docx", "txt"],
-                              key="fmt_file")
+    f_file = st.file_uploader("Script (PDF / DOCX / TXT)", type=["pdf", "docx", "txt"], key="fmt_file")
     if st.button("✨ Format Script", type="primary"):
         if not f_file:
             st.error("Upload a script file.")
         else:
-            _fresh_run_state()
-            _UI.caption = st.empty()
-            _UI.progress = st.progress(0.0)
-            with st.expander("Live log", expanded=True):
-                _UI.logbox = st.empty()
-            try:
-                with st.spinner("Formatting…"):
-                    res = run_format(f_file, f_title)
-                st.session_state["last_result"] = res
+            with st.spinner("Formatting…"):
+                try:
+                    from app.pipeline import model4_formatter
+                    from app.pipeline.textextract import extract_text
+                    from app.zipper import zip_files
+
+                    wd = workdir("fmt_" + uuid.uuid4().hex[:8])
+                    src = save_upload(f_file, wd / f_file.name)
+                    # DOCX → text file the checker can read; PDF/TXT pass through.
+                    if src.suffix.lower() == ".docx":
+                        txt = wd / f"{src.stem}.txt"
+                        txt.write_text(extract_text(src), encoding="utf-8")
+                        src = txt
+                    out = model4_formatter.run(str(src), outdir=str(wd))
+                    r = out["result"]
+                    zip_path = wd / "Formatted.zip"
+                    zip_files([Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])], zip_path)
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Formatting", r["format_status"])
+                    c2.metric("Episodes", r["n_episodes"])
+                    c3.metric("Readability", f"{r['readability']}/5")
+                    st.success("Done.")
+                    st.download_button("⬇️ Download Formatted (PDF + report + corrected)",
+                                       data=zip_path.read_bytes(), file_name="Formatted.zip",
+                                       mime="application/zip")
+                    with st.expander("Formatting report"):
+                        st.markdown(Path(out["report"]).read_text(encoding="utf-8"))
+                except Exception as e:
+                    st.error(f"Formatting failed: {e}")
+                    st.exception(e)
+
+# ── Full Adaptation Checker (detached) ───────────────────────────────────────
+with tab_pipe:
+    st.write("Videos + Hindi OG script → SRTs, screenplays, master PDF, and an adaptation "
+             "report. The job runs in the background — **you can close this tab** and check "
+             "**My Jobs** later. Results also land in your Drive (`SRT_Files/`, `Screenplays/`).")
+
+    src_mode = st.radio("Video source", ["Upload video files", "Google Drive folder"], horizontal=True)
+    videos = drive_url = sa_file = None
+    if src_mode == "Upload video files":
+        videos = st.file_uploader("Episode videos (.mp4/.mkv/.mov)",
+                                  type=["mp4", "mkv", "mov", "webm", "avi"], accept_multiple_files=True)
+    else:
+        drive_url = st.text_input("Google Drive folder link (raw videos)")
+        sa_file = st.file_uploader("Service-account key (JSON)", type=["json"],
+                                   help="Share the Drive folder with the service account's client_email.")
+
+    c1, c2 = st.columns(2)
+    p_title = c1.text_input("Show title (optional)")
+    max_eps = c2.number_input("Max episodes (0 = all)", min_value=0, value=0, step=1)
+    hindi = st.file_uploader("Hindi OG script (PDF / DOCX / TXT)", type=["pdf", "docx", "txt"])
+
+    if st.button("▶️ Start Full Pipeline", type="primary"):
+        errs = []
+        if not settings.GEMINI_API_KEY:
+            errs.append("Enter your Gemini API key in the sidebar.")
+        if not hindi:
+            errs.append("Upload the Hindi OG script.")
+        if src_mode == "Upload video files" and not videos:
+            errs.append("Upload at least one video file.")
+        if src_mode == "Google Drive folder" and not (drive_url and sa_file):
+            errs.append("Provide the Drive link and service-account JSON.")
+        if errs:
+            for e in errs:
+                st.error(e)
+        else:
+            job_id = uuid.uuid4().hex
+            wd = workdir(job_id)
+            hindi_path = str(save_upload(hindi, wd / f"hindi_{hindi.name}"))
+            spec = {"job_id": job_id, "workdir": str(wd), "mode": "pipeline",
+                    "title": p_title, "max_episodes": int(max_eps), "hindi_path": hindi_path}
+            if src_mode == "Upload video files":
+                vids_dir = wd / "_input_videos"
+                vids_dir.mkdir(parents=True, exist_ok=True)
+                for v in videos:
+                    save_upload(v, vids_dir / v.name)
+                spec.update(source="local", videos_dir=str(vids_dir))
+            else:
+                sa_path = save_upload(sa_file, wd / "sa.json")
+                spec.update(source="drive", drive_url=drive_url, sa_json_path=str(sa_path))
+
+            launch_detached_job(spec)
+            st.session_state["active_job"] = job_id
+            st.success(f"🚀 Job started: `{job_id}`. Track it in **My Jobs** — you can close this tab.")
+
+# ── My Jobs (status + downloads) ─────────────────────────────────────────────
+with tab_jobs:
+    jobs = list_jobs()
+    if not jobs:
+        st.info("No jobs yet. Start one from the Full Adaptation Checker tab.")
+    else:
+        ids = [j["job_id"] for j in jobs]
+        labels = {j["job_id"]: f"{j.get('show_title') or '(untitled)'} · {j.get('status','?')} · {j['job_id'][:8]}"
+                  for j in jobs}
+        default = st.session_state.get("active_job")
+        idx = ids.index(default) if default in ids else 0
+        chosen = st.selectbox("Job", ids, index=idx, format_func=lambda i: labels[i])
+        auto = st.checkbox("Auto-refresh (6s while running)", value=True)
+        if st.button("🔄 Refresh now"):
+            st.rerun()
+
+        s = read_status(chosen)
+        if s:
+            status = render_job(s)
+            if auto and status == "running":
+                time.sleep(6)
                 st.rerun()
-            except Exception as e:
-                st.error(f"Formatting failed: {e}")
-                st.code(traceback.format_exc())

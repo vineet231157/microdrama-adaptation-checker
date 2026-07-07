@@ -36,29 +36,34 @@ def _workdir(task_id: str) -> Path:
 def format_task(self, task_id: str, input_path: str, show_title: str = ""):
     wd = _workdir(task_id)
     try:
+        from .pipeline import model4_formatter
+
         state.set_step(task_id, 1, "Formatting script…", 20)
         state.log(task_id, f"Formatting {Path(input_path).name}")
 
-        title = show_title or Path(input_path).stem.replace("_", " ").title()
-
-        # Normalise DOCX/TXT → text → markdown-ish so the checker can parse it.
+        # DOCX isn't handled by pdftotext, so convert it to a .txt the checker reads
+        # directly. PDF and TXT are passed straight through (identical to the model).
         src = Path(input_path)
-        if src.suffix.lower() in (".docx", ".txt"):
+        if src.suffix.lower() == ".docx":
             text = extract_text(src)
-            md_path = wd / f"{src.stem}.md"
-            md_path.write_text(text, encoding="utf-8")
-        else:  # PDF — format_check extracts via pdftotext internally
-            md_path = src
+            fmt_input = wd / f"{src.stem}.txt"
+            fmt_input.write_text(text, encoding="utf-8")
+        else:  # .pdf → pdftotext -layout ; .txt → read as-is
+            fmt_input = src
 
-        merged_text = extract_text(input_path) if src.suffix.lower() != ".pdf" else ""
-        result = step4_format.run(task_id, md_path, merged_text, wd, title)
+        state.set_step(task_id, 1, "Checking + formatting…", 60)
+        # Produces, in wd:  <base>_formatted.pdf, <base>_format_report.md, <base>_corrected.txt
+        out = model4_formatter.run(str(fmt_input), outdir=str(wd))
+        r = out["result"]
+        state.log(task_id, f"Formatting {r['format_status']} · {r['n_episodes']} episodes · "
+                           f"readability {r['readability']}/5.")
 
         out_zip = wd / "Formatted.zip"
-        zip_files([result["master_pdf"], result["corrected_txt"]], out_zip)
+        zip_files([Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])], out_zip)
         state.add_artifact(task_id, "format_pdf",
                            f"{settings.PUBLIC_BASE_URL}/api/download/{task_id}/format")
         state.finish(task_id)
-        state.log(task_id, "Done — formatted PDF ready to download.")
+        state.log(task_id, "Done — formatted PDF + report ready to download.")
     except Exception as e:
         state.fail(task_id, str(e))
         state.log(task_id, traceback.format_exc(), level="error")
@@ -91,7 +96,7 @@ def pipeline_task(self, task_id: str, drive_url: str, access_token: str,
 
         # ── STEP 4 — Format the master screenplay ──────────────────────────
         s4 = step4_format.run(task_id, s3["merged_md"], s3["merged_text"], wd, title)
-        # Upload the master PDF to Drive (into the individual-screenplays folder).
+        # Upload the master PDF to Drive (into the Screenplays folder).
         drive.upload(s4["master_pdf"], s4["master_pdf"].name, s2["folder_id"], "application/pdf")
 
         # ── STEP 5 — Adaptation evaluation ─────────────────────────────────
@@ -101,7 +106,7 @@ def pipeline_task(self, task_id: str, drive_url: str, access_token: str,
         # ── Final bundle ───────────────────────────────────────────────────
         state.set_step(task_id, 5, "Packaging final deliverables…", 96)
         final_zip = wd / "Final_Deliverables.zip"
-        zip_files([s4["master_pdf"], s5["report_pdf"], s5["report_json"]], final_zip)
+        zip_files([s4["master_pdf"], s4["report_md"], s5["report_pdf"], s5["report_json"]], final_zip)
         state.add_artifact(task_id, "final_zip",
                            f"{settings.PUBLIC_BASE_URL}/api/download/{task_id}/final")
 

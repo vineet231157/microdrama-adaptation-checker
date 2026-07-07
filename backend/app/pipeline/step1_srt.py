@@ -10,7 +10,6 @@ For each episode video in the Drive folder:
 """
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from .. import state
@@ -52,8 +51,9 @@ def run(task_id: str, drive: DriveClient, source_folder_id: str, workdir: Path) 
                                episode_number(v["name"]) or 0, v["name"]))
     state.log(task_id, f"Found {len(videos)} episode(s) in Drive.")
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    srt_folder_id = drive.get_or_create_subfolder(source_folder_id, f"Extracted_SRTs_{ts}")
+    # Create/reuse an "SRT_Files" folder inside the source folder (matches the
+    # original notebook's behaviour).
+    srt_folder_id = drive.get_or_create_subfolder(source_folder_id, "SRT_Files")
     state.set_drive_link(task_id, "srt_folder", DriveClient.folder_link(srt_folder_id))
 
     crop: autocrop.Crop | None = None

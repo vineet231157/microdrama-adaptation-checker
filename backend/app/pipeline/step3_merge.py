@@ -22,16 +22,20 @@ def _normalise_episode_body(ep_num: int, text: str) -> str:
     while lines and _EP_HEADER.match(lines[0]):
         lines.pop(0)
     body = "\n".join(lines).strip()
-    return f"# EPISODE {ep_num}\n\n{body}"
+    # Plain 'EPISODE N' (no markdown '#') so the Step-4 checker/renderer detect it
+    # as a real episode header (matches the notebook's stitching).
+    return f"EPISODE {ep_num}\n\n{body}"
 
 
 def run(task_id: str, episodes: list[dict], workdir: Path, show_title: str) -> dict:
     """Returns {'merged_text': str, 'merged_md': Path}."""
     state.set_step(task_id, 3, "Merging episodes into a master document…", 62)
 
+    # Plain-text preamble (no markdown) — the formatter treats unknown lines as
+    # action, and the '#'-prefixed title would otherwise confuse header detection.
     parts = [
-        f"# {show_title} — MASTER SCREENPLAY\n\n"
-        f"*Stitched from {len(episodes)} episode(s). Dialogue kept verbatim.*\n"
+        f"{show_title} — MASTER SCREENPLAY\n"
+        f"Stitched from {len(episodes)} episode(s). Dialogue kept verbatim.\n"
     ]
     for ep in sorted(episodes, key=lambda e: e["ep"]):
         parts.append(_normalise_episode_body(ep["ep"], ep["screenplay"]))

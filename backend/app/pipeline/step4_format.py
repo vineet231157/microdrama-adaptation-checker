@@ -120,17 +120,20 @@ def run(task_id: str, merged_md: Path, merged_text: str, workdir: Path, show_tit
     corrected = corrected_txt.read_text(encoding="utf-8")
 
     master_pdf = workdir / "Master_Screenplay.pdf"
-    render_master_pdf(
-        corrected, master_pdf,
-        title=f"{show_title} — Master Screenplay",
-        subtitle=f"{report['n_episodes']} episodes · formatting {report['format_status']} · "
-                 f"readability {report['readability']}/5",
-    )
+    # Use the same Model-4 renderer as the standalone Formatter so the master
+    # screenplay matches the validated house style / example outputs.
+    from . import model4_formatter
+    model4_formatter.render_pdf(corrected, str(master_pdf), f"{show_title} — Master Screenplay")
+
+    # Also write the formatting report markdown (same format as the examples).
+    report_md = workdir / "Master_Screenplay_format_report.md"
+    after = FC.run(str(corrected_txt))
+    model4_formatter.write_report(report, str(report_md), f"{show_title} — Master Screenplay", after=after)
 
     state.log(
         task_id,
         f"Step 4 complete — formatting {report['format_status']}, "
         f"{report['n_episodes']} episodes, readability {report['readability']}/5.",
     )
-    return {"master_pdf": master_pdf, "corrected_txt": corrected_txt,
+    return {"master_pdf": master_pdf, "corrected_txt": corrected_txt, "report_md": report_md,
             "corrected_text": corrected, "report": report}
