@@ -219,47 +219,81 @@ st.caption("Chinese microdrama → Hindi director-ready screenplay, end to end."
 tab_fmt, tab_pipe, tab_jobs = st.tabs(
     ["✨ Formatting Only", "🚀 Full Adaptation Checker", "📂 My Jobs"])
 
-# ── Formatting Only (inline, fast) ───────────────────────────────────────────
+# ── Formatting Only (inline) ─────────────────────────────────────────────────
 with tab_fmt:
-    st.write("Upload an unformatted script → cleanly formatted screenplay PDF + a "
-             "formatting report. Deterministic, fast, no API key needed.")
+    st.write("Upload an unformatted script → a cleanly formatted screenplay + report. "
+             "Optionally enrich it into a **director-ready** screenplay (Scene Profiles with "
+             "character descriptions + an emotional cue on every line, dialogue kept verbatim).")
+
     f_title = st.text_input("Title (optional)", key="fmt_title")
     f_file = st.file_uploader("Script (PDF / DOCX / TXT)", type=["pdf", "docx", "txt"], key="fmt_file")
+    enrich = st.toggle(
+        "🎬 Director-ready enrichment (AI)", value=bool(settings.GEMINI_API_KEY),
+        help="Adds Scene Profiles (character age/build/state-of-mind), grounded action and an "
+             "emotion bracket on every dialogue line. Needs the Gemini key; takes longer on long scripts.")
+    if enrich and not settings.GEMINI_API_KEY:
+        st.info("Enrichment needs a Gemini key (configure it in the sidebar/secrets). "
+                "Without it you still get the clean formatted PDF.")
+
     if st.button("✨ Format Script", type="primary"):
         if not f_file:
             st.error("Upload a script file.")
         else:
-            with st.spinner("Formatting…"):
-                try:
-                    from app.pipeline import model4_formatter
-                    from app.pipeline.textextract import extract_text
-                    from app.zipper import zip_files
+            try:
+                from app.pipeline import model4_formatter
+                from app.pipeline.textextract import extract_text
+                from app.zipper import zip_files
 
-                    wd = workdir("fmt_" + uuid.uuid4().hex[:8])
-                    src = save_upload(f_file, wd / f_file.name)
-                    # DOCX → text file the checker can read; PDF/TXT pass through.
-                    if src.suffix.lower() == ".docx":
-                        txt = wd / f"{src.stem}.txt"
-                        txt.write_text(extract_text(src), encoding="utf-8")
-                        src = txt
+                wd = workdir("fmt_" + uuid.uuid4().hex[:8])
+                src = save_upload(f_file, wd / f_file.name)
+                if src.suffix.lower() == ".docx":  # DOCX → text the checker can read
+                    txt = wd / f"{src.stem}.txt"
+                    txt.write_text(extract_text(src), encoding="utf-8")
+                    src = txt
+
+                with st.spinner("Stage 1 — checking & formatting…"):
                     out = model4_formatter.run(str(src), outdir=str(wd))
-                    r = out["result"]
-                    zip_path = wd / "Formatted.zip"
-                    zip_files([Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])], zip_path)
+                r = out["result"]
+                files = [Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])]
 
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Formatting", r["format_status"])
-                    c2.metric("Episodes", r["n_episodes"])
-                    c3.metric("Readability", f"{r['readability']}/5")
-                    st.success("Done.")
-                    st.download_button("⬇️ Download Formatted (PDF + report + corrected)",
-                                       data=zip_path.read_bytes(), file_name="Formatted.zip",
-                                       mime="application/zip")
-                    with st.expander("Formatting report"):
-                        st.markdown(Path(out["report"]).read_text(encoding="utf-8"))
-                except Exception as e:
-                    st.error(f"Formatting failed: {e}")
-                    st.exception(e)
+                director_pdf = None
+                if enrich and settings.GEMINI_API_KEY:
+                    from app.pipeline import enrich_director_ready
+                    base = Path(out["pdf"]).stem.replace("_formatted", "")
+                    corrected = Path(out["corrected"]).read_text(encoding="utf-8")
+                    with st.spinner("Stage 2 — director-ready enrichment (AI)… this can take a "
+                                    "few minutes on long scripts."):
+                        # tiny inline progress bar via a status callback
+                        prog = st.progress(0.0)
+                        import app.state as _state
+                        _state.set_step = lambda t, s, l, p: prog.progress(min(p, 100) / 100.0)
+                        _state.log = lambda *a, **k: None
+                        _state.add_artifact = _state.set_drive_link = lambda *a, **k: None
+                        den = enrich_director_ready.run(
+                            "fmt", corrected, wd, f_title or base.replace("_", " ").title(), base=base)
+                        director_pdf = Path(den["director_pdf"])
+                        files = [director_pdf, den["bible_md"]] + files
+
+                zip_path = wd / "Formatted.zip"
+                zip_files(files, zip_path)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Formatting", r["format_status"])
+                c2.metric("Episodes", r["n_episodes"])
+                c3.metric("Readability", f"{r['readability']}/5")
+                st.success("Done." + (" Director-ready PDF included." if director_pdf else ""))
+                if director_pdf and director_pdf.exists():
+                    st.download_button("⬇️ Director-Ready Screenplay (PDF)",
+                                       data=director_pdf.read_bytes(), file_name=director_pdf.name,
+                                       mime="application/pdf")
+                st.download_button("⬇️ Download everything (ZIP)",
+                                   data=zip_path.read_bytes(), file_name="Formatted.zip",
+                                   mime="application/zip")
+                with st.expander("Formatting report"):
+                    st.markdown(Path(out["report"]).read_text(encoding="utf-8"))
+            except Exception as e:
+                st.error(f"Formatting failed: {e}")
+                st.exception(e)
 
 # ── Full Adaptation Checker (detached) ───────────────────────────────────────
 with tab_pipe:

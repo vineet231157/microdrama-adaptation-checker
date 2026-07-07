@@ -161,6 +161,103 @@ Return ONLY the JSON object.
 """
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DIRECTOR-READY ENRICHMENT (Formatting mode, Stage 2) — the "Enrichment Model"
+# Turns a clean script into a director-ready screenplay: Scene Profiles
+# (character age/build/state-of-mind), grounded action, and an emotional bracket
+# on every dialogue cue. Dialogue is kept VERBATIM. Output is @-markup that
+# render_director_ready.py renders.
+# ═══════════════════════════════════════════════════════════════════════════
+ENRICH_SYSTEM_INSTRUCTION = """You are a director-ready screenplay enrichment engine for Hindi
+micro-dramas. You turn a clean script into a screenplay a director can shoot as-is: every scene
+states who is in the room, what they look like, where they are, what they feel, and how they
+physically behave — before a line is spoken.
+
+HARD RULES (non-negotiable):
+1) DIALOGUE IS VERBATIM. Never rewrite, translate, shorten, reorder, add, or drop a spoken line.
+   The only allowed change is fixing an obvious OCR typo in a NAME. Keep the Hindi/English mix exactly.
+2) NO NEW STORY. No new characters, plot, twists, locations, or outcomes. You add texture to what is
+   already there — blocking, bodily reaction, and emotional cues — never new events.
+3) CONTINUITY IS LAW. Use the CHARACTER BIBLE provided: each character's name, age and build stay
+   identical in every scene. Only "state of mind" changes per scene.
+4) SHOW, DON'T TELL in the scene body. Explicit emotion/state lives ONLY in the Scene Profile (a
+   crew-facing note). Inside the scene, emotion is shown via movement/micro-expression and cued in
+   brackets on the character line.
+
+WHAT TO ADD:
+• A SCENE PROFILE before each scene (new location/time, a new character enters, or a mood shift):
+  - SETTING: [time] · [specific place] · [atmospheric vibe in a phrase] (vibe = how it should feel).
+  - One line per character present: NAME, age, build/appearance, wardrobe. State of mind: <one line>.
+  For a continuous beat in the same place/people, use a short STATE UPDATE instead of a full profile.
+• Grounded ACTION around the verbatim lines: blocking ("crosses to the window"), visceral reaction
+  ("jaw tightens", "knuckles whiten"), strong specific verbs. No action paragraph over ~5 lines.
+• An EMOTIONAL BRACKET (1–3 words) on EVERY dialogue cue line: e.g. NOOR (firm, holding back hurt),
+  SAMAR (cold fury), AVNI (V.O., elegiac). If a line hides a feeling, state the surface in the
+  bracket and let the action betray the truth.
+
+OUTPUT FORMAT — emit ONLY these markup lines, one per line, nothing else (no prose, no code fences):
+  @EP|EPISODE <n>
+  @SC|Scene <k> / <INT./EXT. LOCATION — DESCRIPTOR. DAY/NIGHT>     (restart k at 1 each episode)
+  @PB
+  @SET|<time · place · vibe>
+  @CH|NAME, age, build/appearance, wardrobe. State of mind: <one line>.
+  @PE
+  @AC|<grounded action, left-aligned>
+  @CUE|NAME (emotion cue)
+  @DL|<verbatim dialogue line>
+  @SU|<state update>            (only for continuous beats instead of a full @PB profile)
+  @TR|<transition e.g. CUT TO:, FREEZE FRAME>   (optional)
+
+EXAMPLE (input → markup):
+Input:
+  S6. INT. ADMISSION COUNTER. SAME TIME
+  Noor walks to the counter and asks firmly.
+  NOOR
+  Aapne to bola tha, koi admission fees nahin hai..
+Markup:
+  @SC|Scene 6 / INT. ADMISSION COUNTER — ELITE SCHOOL. DAY
+  @PB
+  @SET|Mid-morning · elite school admission counter · polished marble, cold and intimidating.
+  @CH|NOOR, 21, slight build, simple jeans and tee, hair tied back. State of mind: humiliated but refusing to show it.
+  @PE
+  @AC|Noor crosses the marble floor with quick, clipped steps, tote clutched to her chest. She plants both hands on the counter.
+  @CUE|NOOR (firm, holding back hurt)
+  @DL|Aapne to bola tha, koi admission fees nahin hai..
+"""
+
+
+def build_bible_prompt(script_text: str) -> str:
+    return f"""Read this whole script and produce a CHARACTER BIBLE: for every recurring character,
+lock their fixed traits so they stay identical across all episodes.
+
+Return one bullet per character, format:
+- NAME — age, build/appearance, signature wardrobe, speech texture.
+
+Keep it concise (one line each). Ground it in the text; if age isn't stated, give a consistent
+best estimate. Return ONLY the bullet list.
+
+----- SCRIPT -----
+{script_text}
+----- END SCRIPT -----
+"""
+
+
+def build_enrich_prompt(ep_num: int, episode_text: str, character_bible: str) -> str:
+    return f"""Enrich EPISODE {ep_num} into director-ready @-markup, following all rules.
+
+Use this CHARACTER BIBLE for consistent names/ages/builds:
+{character_bible}
+
+Begin your output with exactly:  @EP|EPISODE {ep_num}
+Restart scene numbers at Scene 1 for this episode. Keep every @DL line verbatim from the input.
+Output ONLY @-markup lines.
+
+----- EPISODE {ep_num} (clean script) -----
+{episode_text}
+----- END EPISODE {ep_num} -----
+"""
+
+
 # Strict JSON schema Gemini must fill (mapped 1:1 onto the PDF report sections).
 EVAL_SCHEMA = {
     "type": "object",

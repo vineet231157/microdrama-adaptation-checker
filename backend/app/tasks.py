@@ -51,15 +51,25 @@ def format_task(self, task_id: str, input_path: str, show_title: str = ""):
         else:  # .pdf → pdftotext -layout ; .txt → read as-is
             fmt_input = src
 
-        state.set_step(task_id, 1, "Checking + formatting…", 60)
+        state.set_step(task_id, 1, "Checking + formatting…", 40)
         # Produces, in wd:  <base>_formatted.pdf, <base>_format_report.md, <base>_corrected.txt
         out = model4_formatter.run(str(fmt_input), outdir=str(wd))
         r = out["result"]
         state.log(task_id, f"Formatting {r['format_status']} · {r['n_episodes']} episodes · "
                            f"readability {r['readability']}/5.")
+        files = [Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])]
+
+        # Stage 2 — director-ready enrichment (only if a Gemini key is configured).
+        if settings.GEMINI_API_KEY:
+            from .pipeline import enrich_director_ready
+            base = Path(out["pdf"]).stem.replace("_formatted", "")
+            corrected = Path(out["corrected"]).read_text(encoding="utf-8")
+            den = enrich_director_ready.run(task_id, corrected, wd,
+                                            show_title or base.replace("_", " ").title(), base=base)
+            files = [Path(den["director_pdf"]), Path(den["bible_md"])] + files
 
         out_zip = wd / "Formatted.zip"
-        zip_files([Path(out["pdf"]), Path(out["report"]), Path(out["corrected"])], out_zip)
+        zip_files(files, out_zip)
         state.add_artifact(task_id, "format_pdf",
                            f"{settings.PUBLIC_BASE_URL}/api/download/{task_id}/format")
         state.finish(task_id)

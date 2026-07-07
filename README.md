@@ -13,15 +13,22 @@ Hosted as a **Streamlit** web app so any scriptwriter can use it from a browser.
 
 ## Two modes
 
-### ✨ Formatting Only — instant, no AI
-Upload an unformatted script (PDF/DOCX/TXT). You get back, exactly like the
-notebook did, three files zipped together:
-- `<name>_formatted.pdf` — the re-typeset, renumbered screenplay
+### ✨ Formatting Only
+Upload an unformatted script (PDF/DOCX/TXT). Two stages:
+
+**Stage 1 (deterministic, instant, no key)** — the same 3 files as the notebook:
+- `<name>_formatted.pdf` — re-typeset, renumbered screenplay
 - `<name>_format_report.md` — status, readability, long-dialogue table, action
   walls, emotion-as-action flags, runtime
-- `<name>_corrected.txt` — the corrected plain text
+- `<name>_corrected.txt` — corrected plain text
 
-Runs **inline in seconds**. No API key, no GPU.
+**Stage 2 — Director-Ready enrichment (optional, AI)** — toggle it on to turn the
+clean script into a **director-ready screenplay** that matches the house example:
+a **SCENE PROFILE** before each scene (each character's age/build/appearance +
+one-line *state of mind*), grounded action (blocking + bodily reaction), and an
+**emotional bracket on every dialogue cue** — with **dialogue kept verbatim**.
+Adds `<name>_director_ready.pdf` + `<name>_character_bible.md`. Needs the Gemini
+key; takes longer on long scripts (it enriches episode-by-episode for continuity).
 
 ### 🚀 Full Adaptation Checker — the 5-step pipeline (can run for hours)
 Give it the episode **videos** (drag-drop *or* a Google Drive folder) and the
