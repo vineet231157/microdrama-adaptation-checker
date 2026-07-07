@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Canonical deps live at the repo root.
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Light deps + the heavy OCR stack (the Docker image runs the full pipeline).
+COPY requirements.txt requirements-ocr.txt ./
+RUN pip install -r requirements.txt -r requirements-ocr.txt
 
 # Bring in the shared pipeline code + the Streamlit UI.
 COPY backend/app ./backend/app

@@ -106,10 +106,18 @@ gh repo create microdrama-adaptation-checker --private --source=. --push
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # + brew/apt install poppler ffmpeg
+pip install -r requirements.txt          # UI + formatting + screenplay + eval
+# For the FULL video pipeline (Step-1 subtitle OCR), also install the heavy stack:
+pip install -r requirements-ocr.txt      # + brew/apt install poppler ffmpeg
 export GEMINI_API_KEY=your-key            # or paste it in the sidebar
 streamlit run streamlit/streamlit_app.py  # → http://localhost:8501
 ```
+
+> **Dependencies are split on purpose.** `requirements.txt` is light so
+> **Streamlit Community Cloud installs it cleanly**; the heavy OCR stack
+> (`paddleocr`/`videocr`/OpenCV) lives in `requirements-ocr.txt` and is installed
+> only by the Docker image. That's why the full video pipeline runs on Docker,
+> not on Community Cloud.
 
 ---
 
@@ -211,7 +219,8 @@ distribute the key in files for people to run locally — that exposes it.
 
 | Symptom | Fix |
 |---------|-----|
-| `paddlepaddle` install fails | Set **Python 3.11** (Streamlit Cloud: Advanced settings). |
+| **"Error installing requirements" on Streamlit Cloud** | Expected if the OCR stack is in the root `requirements.txt`. This repo keeps it light (OCR is in `requirements-ocr.txt`, Docker-only) so Cloud installs cleanly. Pull latest + reboot the app. Also set **Python 3.11**. |
+| `paddlepaddle` install fails | It shouldn't be on Community Cloud (it's in `requirements-ocr.txt`, Docker only). Locally, set **Python 3.11**. |
 | `pdftotext: not found` / empty PDF text | Ensure `poppler-utils` is installed (`packages.txt` / Dockerfile). |
 | Full pipeline killed / times out on Streamlit Cloud | Expected — run the video pipeline on a Docker server (above), not Community Cloud. |
 | OCR very slow | No GPU; use `paddlepaddle-gpu` on a CUDA host and toggle GPU in the sidebar. |

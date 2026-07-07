@@ -29,9 +29,16 @@ BACKEND = _HERE.parents[0] / "backend"
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(BACKEND))
 
+import importlib.util  # noqa: E402
+
 from app.config import settings  # noqa: E402
 
 st.set_page_config(page_title="Microdrama Adaptation Checker", page_icon="🎬", layout="wide")
+
+# The subtitle-OCR stack (Step 1) is heavy and only installed in the Docker image.
+# On Streamlit Community Cloud it's absent — Formatting / screenplay / eval still work.
+OCR_AVAILABLE = (importlib.util.find_spec("cv2") is not None
+                 and importlib.util.find_spec("paddleocr") is not None)
 
 PIPELINE_STEPS = ["SRT extraction", "Screenplay", "Merge", "Format", "Evaluation"]
 ZIP_LABELS = [
@@ -284,6 +291,14 @@ with tab_pipe:
     st.write("Videos + Hindi OG script → SRTs, screenplays, master PDF, and an adaptation "
              "report. The job runs in the background — **you can close this tab** and check "
              "**My Jobs** later. Results also land in your Drive (`SRT_Files/`, `Screenplays/`).")
+
+    if not OCR_AVAILABLE:
+        st.warning(
+            "⚠️ **Subtitle OCR (Step 1) isn't available on this instance.** This is expected on "
+            "Streamlit Community Cloud, which can't install the heavy OCR/GPU stack. Run the full "
+            "video pipeline on the **Docker image** (see README → Deploy). Formatting-Only and the "
+            "screenplay/evaluation steps work fine here."
+        )
 
     src_mode = st.radio("Video source", ["Upload video files", "Google Drive folder"], horizontal=True)
     videos = drive_url = sa_file = None

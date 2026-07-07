@@ -1,7 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# CANONICAL Python deps for the whole tool. This lives at the repo root so that
-# Streamlit Community Cloud auto-detects it. The Docker image and the nested
-# streamlit/requirements.txt both reference this file (no duplication/drift).
+# LIGHT deps — installs cleanly on Streamlit Community Cloud (no GPU/OCR stack).
+# Covers: the UI, Formatting-Only, screenplay generation, evaluation, Drive, PDFs.
+#
+# The heavy subtitle-OCR stack (PaddleOCR/videocr/OpenCV) is in
+# requirements-ocr.txt and is installed ONLY in the Docker image, because it is
+# large and needs a real server/GPU. Step 1 (OCR) therefore runs on the Docker
+# deployment, not on Community Cloud.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Streamlit UI ─────────────────────────────────────────────────────────────
@@ -15,22 +19,11 @@ tenacity==9.0.0
 google-api-python-client==2.157.0
 google-auth==2.37.0
 
-# ── Subtitle / OCR (Step 1) ──────────────────────────────────────────────────
-# CPU PaddlePaddle by default. On a GPU host use paddlepaddle-gpu and flip the
-# "Use GPU for OCR" toggle in the sidebar.
-paddlepaddle==2.6.2
-paddleocr>=2.6,<3.0.0
-opencv-python-headless==4.10.0.84
-videocr-PaddleOCR @ git+https://github.com/oliverfei/videocr-PaddleOCR.git
-pysrt==1.1.2
-python-Levenshtein==0.26.1
-thefuzz==0.22.1
-rapidfuzz==3.11.0
-
 # ── Documents / PDF ──────────────────────────────────────────────────────────
 reportlab==4.2.5
 pdfplumber==0.11.5
 python-docx==1.1.2
+pysrt==1.1.2
 
 # state.py imports redis at module load (functions are monkeypatched in the
 # Streamlit path, but the import must resolve). Pure-Python, light.
