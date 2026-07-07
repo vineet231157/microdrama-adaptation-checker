@@ -22,10 +22,9 @@ WORKDIR /app
 COPY requirements.txt requirements-ocr.txt ./
 RUN pip install -r requirements.txt
 
-# 2) Heavy OCR stack. Order + the --no-deps videocr install mirror the validated
-#    Colab notebook, which avoids the dependency conflicts that break a naive install.
+# 2) Heavy OCR stack (PaddleOCR + OpenCV). Subtitle→SRT extraction is done in
+#    app/pipeline/subtitle_ocr.py, so there is NO external videocr git dependency.
 RUN pip install -r requirements-ocr.txt
-RUN pip install --no-deps "git+https://github.com/oliverfei/videocr-PaddleOCR.git"
 
 # Bring in the shared pipeline code + the Streamlit UI.
 COPY backend/app ./backend/app

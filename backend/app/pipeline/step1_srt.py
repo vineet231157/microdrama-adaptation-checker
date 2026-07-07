@@ -21,19 +21,13 @@ from .common import episode_number
 
 
 def _run_ocr(video_path: Path, srt_path: Path, crop: autocrop.Crop) -> None:
-    """Run videocr constrained to the calculated crop box."""
-    from videocr import save_subtitles_to_file  # lazy heavy import
+    """OCR the hard-subtitles inside the calculated crop box → .srt."""
+    from . import subtitle_ocr  # PaddleOCR + OpenCV (no external videocr dependency)
 
-    save_subtitles_to_file(
-        str(video_path), str(srt_path),
-        lang=settings.OCR_LANG,
-        time_start="00:00",
-        time_end="",
+    subtitle_ocr.extract_srt(
+        str(video_path), str(srt_path), crop,
         conf_threshold=settings.OCR_CONF_THRESHOLD,
         sim_threshold=settings.OCR_SIM_THRESHOLD,
-        use_gpu=settings.OCR_USE_GPU,
-        frames_to_skip=settings.OCR_FRAMES_TO_SKIP,
-        **crop.as_kwargs(),
     )
 
 

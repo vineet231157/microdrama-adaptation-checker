@@ -49,6 +49,7 @@ class Settings:
     OCR_CONF_THRESHOLD: int = int(os.getenv("OCR_CONF_THRESHOLD", "75"))
     OCR_SIM_THRESHOLD: int = int(os.getenv("OCR_SIM_THRESHOLD", "80"))
     OCR_FRAMES_TO_SKIP: int = int(os.getenv("OCR_FRAMES_TO_SKIP", "1"))
+    OCR_SAMPLE_FPS: float = float(os.getenv("OCR_SAMPLE_FPS", "2.0"))  # subtitle samples/sec
     # Auto-crop tuning
     AUTOCROP_SAMPLES: int = int(os.getenv("AUTOCROP_SAMPLES", "10"))
     AUTOCROP_LOWER_FRACTION: float = float(os.getenv("AUTOCROP_LOWER_FRACTION", "0.30"))
