@@ -1,0 +1,1 @@
+# microdrama-adaptation-checker
