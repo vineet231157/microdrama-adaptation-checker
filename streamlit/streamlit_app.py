@@ -183,31 +183,6 @@ def configured_key() -> str | None:
     return os.environ.get("GEMINI_API_KEY") or _secret("GEMINI_API_KEY")
 
 
-def require_access():
-    """Optional team password gate. Set APP_PASSWORD in secrets/env to enable.
-
-    Lets you host the tool with your own key while ensuring only your team can
-    use it (so strangers can't burn your Gemini quota). Users enter a PASSWORD,
-    never the API key.
-    """
-    pw = _secret("APP_PASSWORD") or os.environ.get("APP_PASSWORD")
-    if not pw:
-        return  # no gate configured → open access (fine for local/VPN use)
-    if st.session_state.get("_authed"):
-        return
-    st.title("🎬 Microdrama Adaptation Checker")
-    st.caption("This tool is password-protected. Ask your admin for the access password.")
-    entered = st.text_input("Access password", type="password")
-    if entered:
-        if entered == pw:
-            st.session_state["_authed"] = True
-            st.rerun()
-        st.error("Incorrect password.")
-    st.stop()
-
-
-require_access()
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Sidebar
 # ═══════════════════════════════════════════════════════════════════════════

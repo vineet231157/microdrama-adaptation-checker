@@ -192,15 +192,13 @@ How it works in this app:
 - If `GEMINI_API_KEY` is set in the host's **Secrets/env**, the app hides the key
   input completely and shows only “✓ API key configured by the host”. The key is
   used server-side and passed to the background job — never sent to the browser.
-- Set `APP_PASSWORD` in Secrets to gate access: users type a **team password**
-  (not the key) to get in, so strangers can't use your hosted app and drain your
-  quota.
 - If **no** host key is configured (someone self-hosting), the app falls back to
   letting that person paste their own key.
 
-**So, to let others use it keyless:** host it yourself with `GEMINI_API_KEY` +
-`APP_PASSWORD` in Secrets, and share the URL + the team password. Do **not**
-distribute the key in files for people to run locally — that exposes it.
+**So, to let others use it keyless:** host it yourself with `GEMINI_API_KEY` in
+Secrets and share the URL. Do **not** distribute the key in files for people to
+run locally — that exposes it. (If the app is public and you want to limit who
+can use it, put it behind your VPN or an auth proxy.)
 
 ## Using the tool
 

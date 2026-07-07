@@ -20,9 +20,9 @@ streamlit run streamlit/streamlit_app.py
 ```
 
 ## Keeping your API key private
-Set `GEMINI_API_KEY` (and optionally `APP_PASSWORD`) in `.streamlit/secrets.toml`
-or the Streamlit Cloud **Secrets** box. When a host key is present the app hides
-the key input entirely — users never see or enter it. See the root README →
+Set `GEMINI_API_KEY` in `.streamlit/secrets.toml` or the Streamlit Cloud
+**Secrets** box. When a host key is present the app hides the key input entirely —
+users never see or enter it. See the root README →
 **“Sharing the tool without giving out your API key.”**
 
 ## Modes
