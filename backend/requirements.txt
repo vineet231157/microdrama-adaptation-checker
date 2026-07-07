@@ -1,0 +1,34 @@
+# ── Web / API ──────────────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+
+# ── Task queue + state ───────────────────────────────────────────────────────
+celery==5.4.0
+redis==5.2.1
+
+# ── Google Drive ─────────────────────────────────────────────────────────────
+google-api-python-client==2.157.0
+google-auth==2.37.0
+google-auth-httplib2==0.2.0
+
+# ── AI / Gemini ──────────────────────────────────────────────────────────────
+google-generativeai==0.8.3
+tenacity==9.0.0
+
+# ── Subtitle / OCR (Step 1) ──────────────────────────────────────────────────
+# NOTE: paddlepaddle-gpu must be installed from the PaddlePaddle index (see
+# Dockerfile). For CPU-only local dev, swap for `paddlepaddle`.
+paddleocr>=2.6,<3.0.0
+opencv-python-headless==4.10.0.84
+videocr-PaddleOCR @ git+https://github.com/oliverfei/videocr-PaddleOCR.git
+pysrt==1.1.2
+python-Levenshtein==0.26.1
+thefuzz==0.22.1
+rapidfuzz==3.11.0
+
+# ── Documents / PDF ──────────────────────────────────────────────────────────
+reportlab==4.2.5
+pdfplumber==0.11.5
+python-docx==1.1.2

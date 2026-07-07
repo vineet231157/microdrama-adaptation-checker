@@ -1,0 +1,14 @@
+# Streamlit server config tuned for long video jobs + large uploads.
+[server]
+maxUploadSize = 4096          # MB — episode videos can be large
+maxMessageSize = 4096
+enableXsrfProtection = true
+enableCORS = false
+
+[theme]
+base = "light"
+primaryColor = "#0f766e"       # teal — matches the report/PDF palette
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

@@ -1,0 +1,45 @@
+# Local + single-host deployment: Redis + FastAPI API + Celery worker.
+# The API and worker share the same image and the same WORK_ROOT volume so the
+# API can serve zip files the worker produced.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - WORK_ROOT=/data/jobs
+    ports:
+      - "8000:8000"
+    volumes:
+      - job-data:/data/jobs
+    depends_on:
+      - redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - WORK_ROOT=/data/jobs
+    volumes:
+      - job-data:/data/jobs
+    depends_on:
+      - redis
+    # --concurrency=1: one long video job per worker; scale with `--scale worker=N`.
+    # For GPU hosts add `gpus: all` and a CUDA base image.
+    command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=1
+
+volumes:
+  redis-data:
+  job-data:

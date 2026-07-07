@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node / Next
+node_modules/
+.next/
+out/
+.vercel
+
+# Env & secrets
+.env
+.env.local
+*.local
+.streamlit/secrets.toml
+secrets.toml
+# service-account keys — never commit
+*service-account*.json
+*-sa.json
+gcp-key*.json
+
+# Job artifacts / temp
+/tmp/
+backend/jobs/
+data/
+
+# OS
+.DS_Store

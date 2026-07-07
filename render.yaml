@@ -1,0 +1,71 @@
+# Render.com blueprint — one-click deploy of the backend (API + worker + Redis).
+# Deploy: push this repo, then Render → New → Blueprint → point at this file.
+# The frontend deploys separately to Vercel (see README).
+services:
+  # ── FastAPI web service ──────────────────────────────────────────────────
+  - type: web
+    name: adaptation-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: standard              # bump for more RAM during PDF/video work
+    healthCheckPath: /health
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false             # set in the dashboard
+      - key: PUBLIC_BASE_URL
+        sync: false             # set to this service's public URL
+      - key: ALLOWED_ORIGINS
+        sync: false             # your Vercel domain
+      - key: WORK_ROOT
+        value: /data/jobs
+      - key: REDIS_URL
+        fromService:
+          name: adaptation-redis
+          type: keyvalue
+          property: connectionString
+    disk:
+      name: jobs
+      mountPath: /data/jobs
+      sizeGB: 20
+
+  # ── Celery worker ─────────────────────────────────────────────────────────
+  # NOTE: for real OCR speed run this on a GPU host (Render GPU / a GCP Cloud Run
+  # GPU job / your own box) with paddlepaddle-gpu + OCR_USE_GPU=true.
+  - type: worker
+    name: adaptation-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: standard
+    dockerCommand: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=1
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OCR_USE_GPU
+        value: "false"
+      - key: WORK_ROOT
+        value: /data/jobs
+      - key: REDIS_URL
+        fromService:
+          name: adaptation-redis
+          type: keyvalue
+          property: connectionString
+    disk:
+      name: jobs-worker
+      mountPath: /data/jobs
+      sizeGB: 20
+
+# ── Redis (broker + shared job state) ────────────────────────────────────────
+  - type: keyvalue
+    name: adaptation-redis
+    plan: standard
+    maxmemoryPolicy: noeviction   # don't drop task state under memory pressure
+    ipAllowList: []               # only internal services connect
+
+# ⚠️ SHARED-STORAGE CAVEAT (read the README): the two disks above are SEPARATE.
+# Redis job STATE is shared across services, but the zip FILES the worker writes
+# are on the worker's disk — the API can't serve them from a different node.
+# For multi-node deploys, switch artifact storage to S3/GCS (see README
+# "Shared storage") OR run API+worker on ONE instance (docker-compose does this).

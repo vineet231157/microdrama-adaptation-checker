@@ -1,0 +1,4 @@
+# The canonical dependency list lives at the repo root (../requirements.txt) so
+# Streamlit Community Cloud can auto-detect it. This thin include keeps a local
+# `pip install -r requirements.txt` working from inside streamlit/ too.
+-r ../requirements.txt
