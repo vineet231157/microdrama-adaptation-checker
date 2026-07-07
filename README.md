@@ -144,24 +144,30 @@ for the full video pipeline** — the free sandbox has **no GPU, limited RAM, an
 recycles idle apps**, so a multi-hour OCR job would be killed. Use a real server
 for that ↓.
 
-### Full video pipeline → Docker on a server (recommended; GPU for OCR speed)
-Because jobs run for hours and Step 1 is OCR-heavy, deploy on a VM/box you
-control (a cloud **GPU VM**, a Hugging Face **GPU Docker Space**, or your own
-workstation):
+### Full video pipeline (with subtitle OCR) → Docker
+Step 1 OCRs the burned-in subtitles, which needs the heavy stack, so the full
+pipeline runs from the Docker image (on your Mac, a VM, or a GPU box). Easiest is
+the dedicated compose file:
 
 ```bash
-# build from the repo root
-docker build -f streamlit/Dockerfile -t adaptation-checker .
-docker run -p 8501:8501 \
-  -e GEMINI_API_KEY=your-key \
-  -v adaptation_jobs:/tmp/adaptation_jobs \   # persist jobs/results across restarts
-  adaptation-checker
-# → http://localhost:8501  (put it behind your VPN / an auth proxy for a team)
+# from the repo root
+echo "GEMINI_API_KEY=your-key" > .env          # your key stays on this machine
+docker compose -f docker-compose.streamlit.yml up --build
+# → http://localhost:8501   (first build is ~10–20 min; it installs PaddleOCR)
 ```
 
-For real OCR throughput: base the image on an NVIDIA CUDA image, replace
-`paddlepaddle` with `paddlepaddle-gpu` in `requirements.txt`, run with
-`--gpus all`, and enable **Use GPU for OCR** in the sidebar.
+`docker compose down` stops it; the `adaptation_jobs` volume keeps your results.
+Raw equivalent without compose:
+```bash
+docker build --platform=linux/amd64 -f streamlit/Dockerfile -t adaptation-checker .
+docker run -p 8501:8501 -e GEMINI_API_KEY=your-key \
+  -v adaptation_jobs:/tmp/adaptation_jobs adaptation-checker
+```
+
+On a laptop, OCR is CPU-only (slow but fine — jobs run in the background and are
+tracked in **My Jobs**). For real throughput: base the image on an NVIDIA CUDA
+image, swap `paddlepaddle` → `paddlepaddle-gpu` in `requirements-ocr.txt`, run
+with `--gpus all`, and enable **Use GPU for OCR** in the sidebar.
 
 > The background job runner and its `status.json`/ZIP artifacts live under
 > `WORK_ROOT` (`/tmp/adaptation_jobs` by default). Mount a volume there so the

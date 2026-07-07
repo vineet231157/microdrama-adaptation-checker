@@ -1,0 +1,30 @@
+# One-command setup for the FULL adaptation checker (with subtitle OCR) on your
+# own machine via Docker.
+#
+#   1. Put your key in a .env file next to this one:   GEMINI_API_KEY=your-key
+#   2. docker compose -f docker-compose.streamlit.yml up --build
+#   3. open http://localhost:8501
+#
+# The named volume persists jobs/results across restarts so the "My Jobs" tab and
+# downloads survive `docker compose down`.
+services:
+  adaptation-checker:
+    build:
+      context: .
+      dockerfile: streamlit/Dockerfile
+    platform: linux/amd64          # OCR wheels are amd64-only (emulated on Apple Silicon)
+    ports:
+      - "8501:8501"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-pro}
+      - ENRICH_MODEL=${ENRICH_MODEL:-gemini-1.5-flash}
+      - ENRICH_CONCURRENCY=${ENRICH_CONCURRENCY:-4}
+      - OCR_USE_GPU=false          # set true only on a CUDA host
+      - WORK_ROOT=/tmp/adaptation_jobs
+    volumes:
+      - adaptation_jobs:/tmp/adaptation_jobs
+    restart: unless-stopped
+
+volumes:
+  adaptation_jobs:

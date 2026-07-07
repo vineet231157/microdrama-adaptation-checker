@@ -1,12 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # HEAVY subtitle-OCR stack for Step 1 of the full video pipeline.
 # Installed ONLY in the Docker image (streamlit/Dockerfile), NOT on Streamlit
-# Community Cloud — these packages are large and need a real server (ideally GPU).
+# Community Cloud. Mirrors the package set from the validated Colab notebook so
+# the versions are known to coexist.
 #
-# NOTE: `videocr-PaddleOCR` is installed SEPARATELY with `--no-deps` (see the
-# Dockerfile) because its declared dependencies conflict with a clean install —
-# exactly how the original Colab notebook did it. Its real runtime deps
-# (fire, lmdb, pyclipper) are listed here instead.
+# `videocr-PaddleOCR` is installed SEPARATELY with `--no-deps` (see the
+# Dockerfile). opencv is intentionally NOT pinned here — paddleocr pulls the
+# opencv build it needs (libgl1 is installed in the image for it). numpy is
+# pinned <2 because paddlepaddle 2.6.x is incompatible with numpy 2.x.
 #
 # Local full-pipeline dev:
 #   pip install -r requirements.txt -r requirements-ocr.txt
@@ -15,12 +16,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 paddlepaddle==2.6.2
 paddleocr>=2.6,<3.0.0
-opencv-python-headless==4.10.0.84
 numpy<2
-python-Levenshtein==0.26.1
-thefuzz==0.22.1
-rapidfuzz==3.11.0
 # videocr's runtime deps (videocr itself is installed --no-deps in the Dockerfile)
 fire
 lmdb
 pyclipper
+python-Levenshtein
+thefuzz
+rapidfuzz
