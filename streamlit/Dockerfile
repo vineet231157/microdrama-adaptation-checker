@@ -6,9 +6,10 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
 
-# poppler (pdftotext), OpenCV runtime libs, ffmpeg (video decode), git (videocr)
+# poppler (pdftotext), OpenCV runtime libs, ffmpeg (video decode), git (videocr),
+# curl (health check)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        poppler-utils libgl1 libglib2.0-0 ffmpeg git build-essential \
+        poppler-utils libgl1 libglib2.0-0 ffmpeg git build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
