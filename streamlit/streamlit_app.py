@@ -156,18 +156,70 @@ def render_job(s: dict):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Secrets / access control
+# ═══════════════════════════════════════════════════════════════════════════
+def _secret(name: str):
+    """Read a value from Streamlit secrets (safe if no secrets file exists)."""
+    try:
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
+def configured_key() -> str | None:
+    """The host's Gemini key from the environment or Streamlit secrets.
+
+    When present, the key stays SERVER-SIDE — it is never shown in the UI and
+    never sent to a user's browser. It is only forwarded to the detached job
+    runner via an environment variable.
+    """
+    return os.environ.get("GEMINI_API_KEY") or _secret("GEMINI_API_KEY")
+
+
+def require_access():
+    """Optional team password gate. Set APP_PASSWORD in secrets/env to enable.
+
+    Lets you host the tool with your own key while ensuring only your team can
+    use it (so strangers can't burn your Gemini quota). Users enter a PASSWORD,
+    never the API key.
+    """
+    pw = _secret("APP_PASSWORD") or os.environ.get("APP_PASSWORD")
+    if not pw:
+        return  # no gate configured → open access (fine for local/VPN use)
+    if st.session_state.get("_authed"):
+        return
+    st.title("🎬 Microdrama Adaptation Checker")
+    st.caption("This tool is password-protected. Ask your admin for the access password.")
+    entered = st.text_input("Access password", type="password")
+    if entered:
+        if entered == pw:
+            st.session_state["_authed"] = True
+            st.rerun()
+        st.error("Incorrect password.")
+    st.stop()
+
+
+require_access()
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Sidebar
 # ═══════════════════════════════════════════════════════════════════════════
 st.sidebar.title("⚙️ Configuration")
 
-# Streamlit Cloud secrets → settings
-if "GEMINI_API_KEY" in st.secrets and not settings.GEMINI_API_KEY:
-    settings.GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+_admin_key = configured_key()
+if _admin_key:
+    # Host provided the key server-side → don't render an input; never expose it.
+    settings.GEMINI_API_KEY = _admin_key
+    st.sidebar.success("✓ Gemini API key configured by the host")
+else:
+    # No host key (e.g. someone self-hosting) → let them supply their own.
+    _k = st.sidebar.text_input(
+        "Gemini API key", type="password",
+        help="No host key found. Paste your own to run the Full pipeline "
+             "(not needed for Formatting Only).")
+    if _k:
+        settings.GEMINI_API_KEY = _k
 
-key_in = st.sidebar.text_input("Gemini API key", type="password", value=settings.GEMINI_API_KEY,
-                               help="Needed for the Full pipeline (Steps 2 & 5). Not for Formatting.")
-if key_in:
-    settings.GEMINI_API_KEY = key_in
 settings.GEMINI_MODEL = st.sidebar.selectbox(
     "Gemini model", ["gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
 settings.OCR_USE_GPU = st.sidebar.toggle("Use GPU for OCR", value=settings.OCR_USE_GPU,
