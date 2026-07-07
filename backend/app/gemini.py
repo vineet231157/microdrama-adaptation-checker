@@ -123,6 +123,36 @@ class GeminiSession:
         return json.loads(raw)
 
 
+def _model_chain(preferred: str) -> list[str]:
+    seen, out = set(), []
+    for m in [preferred, settings.GEMINI_MODEL, *settings.GEMINI_FALLBACKS]:
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+@_retry
+def generate_text(preferred_model: str, system_instruction: str, contents,
+                  *, temperature=0.5, max_output_tokens=8192) -> str:
+    """Stateless, retried, model-fallback generate — SAFE to call from many
+    threads at once (no shared mutable state). Used for concurrent enrichment.
+    """
+    _configure()
+    cfg = genai.types.GenerationConfig(temperature=temperature, max_output_tokens=max_output_tokens)
+    last = None
+    for name in _model_chain(preferred_model):
+        try:
+            mdl = genai.GenerativeModel(name, system_instruction=system_instruction)
+            return mdl.generate_content(contents, generation_config=cfg).text
+        except Exception as e:
+            last = e
+            if _is_unavailable(e):
+                continue
+            raise  # 429s bubble to @_retry
+    raise RuntimeError(f"All Gemini models failed. Last error: {last}")
+
+
 # ── Video File API helpers ────────────────────────────────────────────────
 def upload_video(local_path: Path, poll_seconds: int = 10, timeout_seconds: int = 900):
     """Upload a video to Gemini and block until it is ACTIVE."""

@@ -12,9 +12,11 @@ Flow (per ENRICHMENT_MODEL.md):
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .. import state
+from ..config import settings
 from . import format_check as FC
 from . import render_director_ready
 from .prompts import (ENRICH_SYSTEM_INSTRUCTION, build_bible_prompt,
@@ -50,34 +52,46 @@ def run(task_id: str, corrected_text: str, workdir: Path, title: str,
     """Returns {'director_pdf', 'bible_md', 'markup'} or raises."""
     from .. import gemini  # lazy — AI SDK only needed here
 
-    episodes = split_episodes(corrected_text)
-    state.log(task_id, f"Director-ready enrichment: {len(episodes)} episode(s).")
+    model = settings.ENRICH_MODEL  # fast model (Flash) for this mechanical transform
+    episodes = [(n, t) for (n, t) in split_episodes(corrected_text) if t.strip()]
+    state.log(task_id, f"Director-ready enrichment: {len(episodes)} episode(s) "
+                       f"on {model}, {settings.ENRICH_CONCURRENCY} in parallel.")
 
-    session = gemini.GeminiSession(ENRICH_SYSTEM_INSTRUCTION)
-
-    # 1) Character Bible (continuity across episodes)
-    state.log(task_id, "Building character bible…")
-    bible = session.generate([build_bible_prompt(corrected_text[:_MAX_BIBLE_CHARS])],
-                             temperature=0.3, max_output_tokens=2048).strip()
+    # 1) Character Bible (continuity across episodes) — one quick call
+    state.set_step(task_id, 2, "Building character bible…", 30)
+    bible = gemini.generate_text(model, ENRICH_SYSTEM_INSTRUCTION,
+                                 [build_bible_prompt(corrected_text[:_MAX_BIBLE_CHARS])],
+                                 temperature=0.3, max_output_tokens=2048).strip()
     bible_md = workdir / f"{base}_character_bible.md"
     bible_md.write_text(f"# Character Bible — {title}\n\n{bible}\n", encoding="utf-8")
 
-    # 2) Enrich each episode → @-markup
-    parts: list[str] = []
-    for i, (ep_num, ep_text) in enumerate(episodes, 1):
-        pct = 30 + int(i / max(len(episodes), 1) * 60)
-        state.set_step(task_id, 2, f"Enriching episode {ep_num} ({i}/{len(episodes)})…", pct)
-        if not ep_text.strip():
-            continue
-        markup = session.generate([build_enrich_prompt(ep_num, ep_text, bible)],
-                                  temperature=0.5, max_output_tokens=8192)
+    # 2) Enrich every episode CONCURRENTLY → @-markup (order preserved on collect)
+    def _one(item):
+        ep_num, ep_text = item
+        markup = gemini.generate_text(model, ENRICH_SYSTEM_INSTRUCTION,
+                                      [build_enrich_prompt(ep_num, ep_text, bible)],
+                                      temperature=0.5, max_output_tokens=8192)
         markup = _markup_only(markup)
         if not markup.strip().startswith("@EP"):
             markup = f"@EP|EPISODE {ep_num}\n" + markup
-        parts.append(markup)
-        state.log(task_id, f"✓ Episode {ep_num} enriched.")
+        return markup
 
-    full_markup = "\n".join(parts)
+    results: list[str] = [""] * len(episodes)
+    done = 0
+    with ThreadPoolExecutor(max_workers=settings.ENRICH_CONCURRENCY) as pool:
+        futures = {pool.submit(_one, ep): i for i, ep in enumerate(episodes)}
+        for fut in as_completed(futures):
+            i = futures[fut]
+            try:
+                results[i] = fut.result()
+            except Exception as e:
+                results[i] = f"@EP|EPISODE {episodes[i][0]}\n@AC|[enrichment failed for this episode: {e}]"
+                state.log(task_id, f"✗ Episode {episodes[i][0]} enrichment failed: {e}", level="error")
+            done += 1
+            state.set_step(task_id, 2, f"Enriching episodes ({done}/{len(episodes)})…",
+                           30 + int(done / max(len(episodes), 1) * 60))
+
+    full_markup = "\n".join(m for m in results if m)
     markup_file = workdir / f"{base}_director_ready.markup.txt"
     markup_file.write_text(full_markup, encoding="utf-8")
 

@@ -32,6 +32,10 @@ class Settings:
         ).split(",")
         if m.strip()
     ]
+    # Director-ready enrichment is a fast, mechanical transform → use a FAST model
+    # and run episodes CONCURRENTLY so a long script formats in ~1-2 min, not 15.
+    ENRICH_MODEL: str = os.getenv("ENRICH_MODEL", "gemini-2.0-flash")
+    ENRICH_CONCURRENCY: int = int(os.getenv("ENRICH_CONCURRENCY", "6"))
 
     # ── OCR (Step 1) ──────────────────────────────────────────────────────
     OCR_LANG: str = os.getenv("OCR_LANG", "en")
