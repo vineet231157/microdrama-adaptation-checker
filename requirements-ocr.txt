@@ -3,14 +3,24 @@
 # Installed ONLY in the Docker image (streamlit/Dockerfile), NOT on Streamlit
 # Community Cloud — these packages are large and need a real server (ideally GPU).
 #
-# Local full-pipeline dev:  pip install -r requirements.txt -r requirements-ocr.txt
+# NOTE: `videocr-PaddleOCR` is installed SEPARATELY with `--no-deps` (see the
+# Dockerfile) because its declared dependencies conflict with a clean install —
+# exactly how the original Colab notebook did it. Its real runtime deps
+# (fire, lmdb, pyclipper) are listed here instead.
+#
+# Local full-pipeline dev:
+#   pip install -r requirements.txt -r requirements-ocr.txt
+#   pip install --no-deps "git+https://github.com/oliverfei/videocr-PaddleOCR.git"
 # GPU host: replace `paddlepaddle` with `paddlepaddle-gpu` and enable GPU in the UI.
 # ─────────────────────────────────────────────────────────────────────────────
 paddlepaddle==2.6.2
 paddleocr>=2.6,<3.0.0
 opencv-python-headless==4.10.0.84
 numpy<2
-videocr-PaddleOCR @ git+https://github.com/oliverfei/videocr-PaddleOCR.git
 python-Levenshtein==0.26.1
 thefuzz==0.22.1
 rapidfuzz==3.11.0
+# videocr's runtime deps (videocr itself is installed --no-deps in the Dockerfile)
+fire
+lmdb
+pyclipper

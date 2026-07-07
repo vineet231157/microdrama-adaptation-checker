@@ -1,8 +1,12 @@
 # Streamlit image — runs the whole pipeline in one container.
-# Build from the superapp/ ROOT so it can copy both backend/ and streamlit/:
-#     docker build -f streamlit/Dockerfile -t adaptation-streamlit .
-#     docker run -p 8501:8501 -e GEMINI_API_KEY=... adaptation-streamlit
-FROM python:3.11-slim
+# Build from the repo ROOT so it can copy both backend/ and streamlit/:
+#     docker build -f streamlit/Dockerfile -t adaptation-checker .
+#     docker run -p 8501:8501 -e GEMINI_API_KEY=... adaptation-checker
+#
+# Pinned to linux/amd64: the OCR wheels (paddlepaddle 2.6.2) have no arm64 build,
+# so this guarantees a working install on both Intel and Apple-Silicon Macs
+# (the latter runs it under emulation — slower, but it works).
+FROM --platform=linux/amd64 python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
 
@@ -14,9 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Light deps + the heavy OCR stack (the Docker image runs the full pipeline).
+# 1) Light deps (UI + formatting + gemini + drive + pdf)
 COPY requirements.txt requirements-ocr.txt ./
-RUN pip install -r requirements.txt -r requirements-ocr.txt
+RUN pip install -r requirements.txt
+
+# 2) Heavy OCR stack. Order + the --no-deps videocr install mirror the validated
+#    Colab notebook, which avoids the dependency conflicts that break a naive install.
+RUN pip install -r requirements-ocr.txt
+RUN pip install --no-deps "git+https://github.com/oliverfei/videocr-PaddleOCR.git"
 
 # Bring in the shared pipeline code + the Streamlit UI.
 COPY backend/app ./backend/app
