@@ -125,7 +125,10 @@ def run(path, outdir=None):
     print(f"\n  → formatted PDF : {pdf}")
     print(f"  → report (md)   : {rep}")
     print(f"  → corrected txt : {txt}")
-    return {"pdf": pdf, "report": rep, "corrected": txt, "result": result}
+    # `result` = status of the SOURCE script (may be FAIL if it had numbering
+    # gaps/dupes). `after` = status of the CORRECTED output PDF (what the user
+    # actually gets). The UI should headline `after`, not `result`.
+    return {"pdf": pdf, "report": rep, "corrected": txt, "result": result, "after": after}
 
 
 def main():

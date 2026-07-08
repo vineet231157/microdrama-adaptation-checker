@@ -265,11 +265,20 @@ with tab_fmt:
                 st.stop()
 
             # Show + offer the fast result IMMEDIATELY.
+            after = out.get("after", r)          # status of the CORRECTED output PDF
             c1, c2, c3 = st.columns(3)
-            c1.metric("Formatting", r["format_status"])
+            c1.metric("Output formatting", after["format_status"],
+                      help="Status of the corrected PDF you get (numbering auto-fixed).")
             c2.metric("Episodes", r["n_episodes"])
-            c3.metric("Readability", f"{r['readability']}/5")
+            c3.metric("Readability", f"{after['readability']}/5")
             st.success("✅ Formatted screenplay ready.")
+            # Explain the source-vs-output distinction so 'FAIL' on the source
+            # doesn't look like the tool failed.
+            if r["format_status"] == "FAIL":
+                st.info("ℹ️ Your **uploaded** script had structural issues (usually episode-numbering "
+                        "gaps or duplicates) — these were **auto-corrected** in the PDF above. "
+                        "Any remaining notes (e.g. long dialogue) are writer suggestions in the "
+                        "Formatting report below, not errors.")
             st.download_button("⬇️ Formatted screenplay (PDF)",
                                data=Path(out["pdf"]).read_bytes(),
                                file_name=Path(out["pdf"]).name, mime="application/pdf")
