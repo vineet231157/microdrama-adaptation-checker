@@ -14,6 +14,11 @@ streamlit==1.40.2
 # ── AI / Gemini ──────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
 tenacity==9.0.0
+# Pin grpc/protobuf so pip does NOT backtrack for hours resolving them (the
+# google + streamlit deps otherwise leave grpcio/grpcio-status underconstrained).
+protobuf==4.25.5
+grpcio==1.68.1
+grpcio-status==1.68.1
 
 # ── Google Drive ─────────────────────────────────────────────────────────────
 # gdown: download a SHARED ("anyone with the link") Drive folder from just its

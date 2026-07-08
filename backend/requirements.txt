@@ -16,6 +16,10 @@ google-auth-httplib2==0.2.0
 # ── AI / Gemini ──────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
 tenacity==9.0.0
+# Pin grpc/protobuf so pip doesn't backtrack for hours resolving them.
+protobuf==4.25.5
+grpcio==1.68.1
+grpcio-status==1.68.1
 
 # ── Subtitle / OCR (Step 1) ──────────────────────────────────────────────────
 # Subtitle→SRT extraction is done in app/pipeline/subtitle_ocr.py (PaddleOCR +
