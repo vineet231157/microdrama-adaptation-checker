@@ -13,10 +13,10 @@ ENV PYTHONUNBUFFERED=1 \
 # System deps:
 #  - poppler-utils → pdftotext (used by format_check.py for PDF extraction)
 #  - libgl1 / libglib2.0-0 → OpenCV runtime
-#  - ffmpeg → robust video decoding for OpenCV/videocr
-#  - git → installing videocr from GitHub
+#  - ffmpeg → robust video decoding for OpenCV
+# (Subtitle OCR uses the built-in subtitle_ocr.py — no external git package.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        poppler-utils libgl1 libglib2.0-0 ffmpeg git build-essential \
+        poppler-utils libgl1 libglib2.0-0 ffmpeg build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

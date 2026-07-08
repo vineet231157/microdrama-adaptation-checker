@@ -18,14 +18,13 @@ google-generativeai==0.8.3
 tenacity==9.0.0
 
 # ── Subtitle / OCR (Step 1) ──────────────────────────────────────────────────
-# NOTE: paddlepaddle-gpu must be installed from the PaddlePaddle index (see
-# Dockerfile). For CPU-only local dev, swap for `paddlepaddle`.
+# Subtitle→SRT extraction is done in app/pipeline/subtitle_ocr.py (PaddleOCR +
+# OpenCV) — NO external videocr dependency. paddlepaddle is CPU by default;
+# swap for paddlepaddle-gpu on a CUDA host.
+paddlepaddle==2.6.2
 paddleocr>=2.6,<3.0.0
-opencv-python-headless==4.10.0.84
-videocr-PaddleOCR @ git+https://github.com/oliverfei/videocr-PaddleOCR.git
+numpy<2
 pysrt==1.1.2
-python-Levenshtein==0.26.1
-thefuzz==0.22.1
 rapidfuzz==3.11.0
 
 # ── Documents / PDF ──────────────────────────────────────────────────────────

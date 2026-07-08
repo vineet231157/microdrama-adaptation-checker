@@ -3,8 +3,8 @@
 For each episode video in the Drive folder:
   • stream-download it into the job's /tmp workspace,
   • (first episode only) auto-calculate the subtitle crop region,
-  • run videocr/PaddleOCR constrained to that crop → .srt,
-  • save the .srt locally, upload it to a new ``Extracted_SRTs_[ts]`` Drive folder,
+  • OCR the hard-subtitles (PaddleOCR + OpenCV) constrained to that crop → .srt,
+  • save the .srt locally, upload it to an ``SRT_Files`` Drive folder,
   • delete the local .mp4 immediately to keep disk usage flat,
   • re-zip the SRTs folder so the frontend can download partial results early.
 """
