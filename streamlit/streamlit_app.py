@@ -307,7 +307,7 @@ with tab_fmt:
 with tab_pipe:
     st.write("Videos + Hindi OG script → SRTs, screenplays, master PDF, and an adaptation "
              "report. The job runs in the background — **you can close this tab** and check "
-             "**My Jobs** later. Results also land in your Drive (`SRT_Files/`, `Screenplays/`).")
+             "**My Jobs** later. Download the results from **My Jobs** when it finishes.")
 
     if not OCR_AVAILABLE:
         st.warning(
@@ -317,15 +317,16 @@ with tab_pipe:
             "screenplay/evaluation steps work fine here."
         )
 
-    src_mode = st.radio("Video source", ["Upload video files", "Google Drive folder"], horizontal=True)
-    videos = drive_url = sa_file = None
+    src_mode = st.radio("Video source", ["Upload video files", "Google Drive link"], horizontal=True)
+    videos = drive_url = None
     if src_mode == "Upload video files":
         videos = st.file_uploader("Episode videos (.mp4/.mkv/.mov)",
                                   type=["mp4", "mkv", "mov", "webm", "avi"], accept_multiple_files=True)
     else:
-        drive_url = st.text_input("Google Drive folder link (raw videos)")
-        sa_file = st.file_uploader("Service-account key (JSON)", type=["json"],
-                                   help="Share the Drive folder with the service account's client_email.")
+        drive_url = st.text_input("Google Drive folder link")
+        st.caption("📎 Share the folder as **‘Anyone with the link’** (Share → General access → "
+                   "Anyone with the link). No Google sign-in, API key, or JSON needed — the app "
+                   "just downloads the videos from the link.")
 
     c1, c2 = st.columns(2)
     p_title = c1.text_input("Show title (optional)")
@@ -335,13 +336,13 @@ with tab_pipe:
     if st.button("▶️ Start Full Pipeline", type="primary"):
         errs = []
         if not settings.GEMINI_API_KEY:
-            errs.append("Enter your Gemini API key in the sidebar.")
+            errs.append("A Gemini API key must be configured (sidebar/secrets).")
         if not hindi:
             errs.append("Upload the Hindi OG script.")
         if src_mode == "Upload video files" and not videos:
             errs.append("Upload at least one video file.")
-        if src_mode == "Google Drive folder" and not (drive_url and sa_file):
-            errs.append("Provide the Drive link and service-account JSON.")
+        if src_mode == "Google Drive link" and not drive_url:
+            errs.append("Paste the shared Google Drive folder link.")
         if errs:
             for e in errs:
                 st.error(e)
@@ -358,8 +359,7 @@ with tab_pipe:
                     save_upload(v, vids_dir / v.name)
                 spec.update(source="local", videos_dir=str(vids_dir))
             else:
-                sa_path = save_upload(sa_file, wd / "sa.json")
-                spec.update(source="drive", drive_url=drive_url, sa_json_path=str(sa_path))
+                spec.update(source="gdrive_link", drive_url=drive_url)
 
             launch_detached_job(spec)
             st.session_state["active_job"] = job_id

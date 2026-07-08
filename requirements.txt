@@ -15,7 +15,12 @@ streamlit==1.40.2
 google-generativeai==0.8.3
 tenacity==9.0.0
 
-# ── Google Drive (service-account mode) ──────────────────────────────────────
+# ── Google Drive ─────────────────────────────────────────────────────────────
+# gdown: download a SHARED ("anyone with the link") Drive folder from just its
+# link — no API key, no OAuth, no service account.
+gdown==5.2.0
+# google-api-python-client/auth are only needed for the optional service-account
+# mode; kept for completeness but not required for the link-based flow.
 google-api-python-client==2.157.0
 google-auth==2.37.0
 

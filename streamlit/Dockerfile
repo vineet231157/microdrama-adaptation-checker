@@ -18,13 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 1) Light deps (UI + formatting + gemini + drive + pdf)
-COPY requirements.txt requirements-ocr.txt ./
-RUN pip install -r requirements.txt
-
-# 2) Heavy OCR stack (PaddleOCR + OpenCV). Subtitle→SRT extraction is done in
+# 1) Heavy OCR stack FIRST (rarely changes) so light-dep edits don't re-trigger
+#    the ~15-min PaddleOCR reinstall. Subtitle→SRT extraction is done in
 #    app/pipeline/subtitle_ocr.py, so there is NO external videocr git dependency.
+COPY requirements-ocr.txt .
 RUN pip install -r requirements-ocr.txt
+
+# 2) Light deps (UI + formatting + gemini + drive + pdf) — cached independently.
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
 # Bring in the shared pipeline code + the Streamlit UI.
 COPY backend/app ./backend/app

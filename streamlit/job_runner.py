@@ -85,14 +85,41 @@ def install_file_state(fs: FileState):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-def build_source(spec: dict, wd: Path):
+def build_source(spec: dict, wd: Path, fs=None):
     """Return (source, source_folder_id, resolved_title)."""
+    from local_source import LocalSource
+
     if spec["source"] == "local":
-        from local_source import LocalSource
         vids_dir = Path(spec["videos_dir"])
         source = LocalSource(vids_dir, wd / "_local_out")
         return source, str(vids_dir), spec.get("title") or "Uploaded Show"
-    # drive
+
+    if spec["source"] == "gdrive_link":
+        # Download a PUBLIC ("anyone with the link") Drive folder with gdown —
+        # no API key / OAuth / service account. Then treat it like local files.
+        import gdown
+        vids_dir = wd / "_gdrive_videos"
+        vids_dir.mkdir(parents=True, exist_ok=True)
+        if fs:
+            fs.set_step(spec["job_id"], 1, "Downloading videos from Google Drive link…", 3)
+        try:
+            gdown.download_folder(url=spec["drive_url"], output=str(vids_dir),
+                                  quiet=True, use_cookies=False, remaining_ok=True)
+        except Exception as e:
+            raise RuntimeError(
+                "Could not download the Drive folder. Make sure it's shared as "
+                f"'Anyone with the link' and the link is a FOLDER link. ({e})")
+        # gdown may nest files in a subfolder named after the Drive folder — flatten.
+        vids = [p for p in vids_dir.rglob("*") if p.is_file()]
+        if not vids:
+            raise RuntimeError("No files found at that Drive link. Share it as "
+                               "'Anyone with the link' and check it's a folder link.")
+        source = LocalSource(vids_dir, wd / "_local_out")
+        # LocalSource.list_videos walks the top dir; point it at the dir holding videos
+        root = vids[0].parent
+        return source, str(root), (spec.get("title") or "Drive Show")
+
+    # optional legacy: service-account mode (only if a JSON path was provided)
     from app.drive import DriveClient, folder_id_from_url
     sa_info = json.loads(Path(spec["sa_json_path"]).read_text(encoding="utf-8"))
     source = DriveClient.from_service_account_info(sa_info)
@@ -106,7 +133,7 @@ def run(spec: dict, wd: Path, fs: FileState):
     from app.zipper import zip_files
 
     task_id = spec["job_id"]
-    source, source_folder_id, title = build_source(spec, wd)
+    source, source_folder_id, title = build_source(spec, wd, fs)
     fs.data["show_title"] = title
     fs.log(task_id, f"Starting pipeline for “{title}”.")
 
