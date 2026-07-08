@@ -52,8 +52,9 @@ def run(task_id: str, corrected_text: str, workdir: Path, title: str,
     """Returns {'director_pdf', 'bible_md', 'markup'} or raises."""
     from .. import gemini  # lazy — AI SDK only needed here
 
-    # Fast, flash-only model chain — never falls back to a slow pro model.
-    models = [settings.ENRICH_MODEL, *settings.ENRICH_FALLBACKS]
+    # Prefer fast models; include the configured pro model as a guaranteed
+    # fallback. gemini.resolve_chain() then keeps only models the key actually has.
+    models = [settings.ENRICH_MODEL, *settings.ENRICH_FALLBACKS, settings.GEMINI_MODEL]
     episodes = [(n, t) for (n, t) in split_episodes(corrected_text) if t.strip()]
     state.log(task_id, f"Director-ready enrichment: {len(episodes)} episode(s) "
                        f"on {models[0]}, {settings.ENRICH_CONCURRENCY} in parallel.")

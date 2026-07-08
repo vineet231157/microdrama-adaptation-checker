@@ -25,20 +25,22 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     # Primary model + ordered fallbacks (first that works is cached for the job).
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+    # Fallbacks span current model families; gemini.resolve_chain() drops any the
+    # key doesn't have (e.g. retired 1.5-* models) and adds whatever IS available.
     GEMINI_FALLBACKS: list[str] = [
         m.strip()
         for m in os.getenv(
-            "GEMINI_FALLBACKS", "gemini-2.5-pro,gemini-2.0-flash,gemini-1.5-flash"
+            "GEMINI_FALLBACKS",
+            "gemini-2.5-pro,gemini-2.0-flash,gemini-2.5-flash,gemini-1.5-pro,gemini-1.5-flash",
         ).split(",")
         if m.strip()
     ]
-    # Director-ready enrichment is a fast, mechanical transform → use a FAST model
-    # and run episodes CONCURRENTLY so a long script formats in ~1-2 min, not 15.
-    # 1.5-flash is the most widely-available fast model; we NEVER fall back to a
-    # slow pro model for enrichment (it would silently make things slow again).
-    ENRICH_MODEL: str = os.getenv("ENRICH_MODEL", "gemini-1.5-flash")
+    # Director-ready enrichment is a fast, mechanical transform → prefer a FAST
+    # model and run episodes CONCURRENTLY. resolve_chain() adds an available pro
+    # model as a safety net so enrichment can't die on "model not found".
+    ENRICH_MODEL: str = os.getenv("ENRICH_MODEL", "gemini-2.0-flash")
     ENRICH_FALLBACKS: list[str] = [
-        m.strip() for m in os.getenv("ENRICH_FALLBACKS", "gemini-2.0-flash,gemini-1.5-flash-8b").split(",")
+        m.strip() for m in os.getenv("ENRICH_FALLBACKS", "gemini-2.5-flash,gemini-1.5-flash").split(",")
         if m.strip()
     ]
     ENRICH_CONCURRENCY: int = int(os.getenv("ENRICH_CONCURRENCY", "4"))

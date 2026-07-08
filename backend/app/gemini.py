@@ -53,13 +53,51 @@ _retry = retry(
 )
 
 
+_AVAILABLE: list[str] | None = None
+
+
+def available_models() -> list[str]:
+    """Model IDs this API key actually supports for generateContent (cached).
+
+    Guards against 404s from deprecated/renamed models (e.g. gemini-1.5-* being
+    retired) by adapting to whatever the key really has.
+    """
+    global _AVAILABLE
+    if _AVAILABLE is None:
+        _configure()
+        try:
+            _AVAILABLE = [
+                m.name.split("/")[-1]
+                for m in genai.list_models()
+                if "generateContent" in getattr(m, "supported_generation_methods", [])
+            ]
+            log.info("Gemini models available to this key: %s", _AVAILABLE)
+        except Exception as e:  # pragma: no cover
+            log.warning("Could not list Gemini models (%s); using preferred names as-is.", e)
+            _AVAILABLE = []
+    return _AVAILABLE
+
+
+def resolve_chain(preferred: list[str]) -> list[str]:
+    """Return an ordered model chain guaranteed to contain models the key has.
+
+    Keeps the caller's preference order, drops names the key doesn't have, then
+    appends any available flash/pro models as a safety net so a call never fails
+    just because every preferred name was renamed/deprecated.
+    """
+    avail = available_models()
+    pref = [m for m in preferred if m]
+    if not avail:
+        return pref                       # couldn't query → try preferred as-is
+    chain = [m for m in pref if m in avail]
+    for m in avail:                       # safety net: prefer flash (fast), then pro
+        if ("flash" in m or "pro" in m) and m not in chain:
+            chain.append(m)
+    return chain or avail[:3]
+
+
 def _candidate_models() -> list[str]:
-    seen, out = set(), []
-    for m in [settings.GEMINI_MODEL, *settings.GEMINI_FALLBACKS]:
-        if m and m not in seen:
-            seen.add(m)
-            out.append(m)
-    return out
+    return resolve_chain([settings.GEMINI_MODEL, *settings.GEMINI_FALLBACKS])
 
 
 class GeminiSession:
@@ -143,9 +181,9 @@ def generate_text(models: list[str], system_instruction: str, contents,
     _configure()
     cfg = genai.types.GenerationConfig(temperature=temperature, max_output_tokens=max_output_tokens)
     last = None
-    for name in models:
-        if not name:
-            continue
+    # resolve_chain filters to models this key actually has, then adds available
+    # flash/pro as a safety net — so enrichment never dies on "model not found".
+    for name in resolve_chain(models):
         try:
             mdl = genai.GenerativeModel(name, system_instruction=system_instruction)
             return mdl.generate_content(contents, generation_config=cfg).text

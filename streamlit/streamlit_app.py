@@ -203,7 +203,11 @@ else:
         settings.GEMINI_API_KEY = _k
 
 settings.GEMINI_MODEL = st.sidebar.selectbox(
-    "Gemini model", ["gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
+    "Gemini model",
+    ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro", "gemini-1.5-flash"],
+    index=0,
+    help="The app auto-detects which models your key supports and falls back "
+         "accordingly, so any choice here is safe.")
 settings.OCR_USE_GPU = st.sidebar.toggle("Use GPU for OCR", value=settings.OCR_USE_GPU,
                                          help="Enable only on a CUDA host.")
 st.sidebar.divider()
