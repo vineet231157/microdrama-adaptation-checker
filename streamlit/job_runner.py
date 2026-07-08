@@ -107,9 +107,12 @@ def build_source(spec: dict, wd: Path, fs=None):
         vids_dir.mkdir(parents=True, exist_ok=True)
         if fs:
             fs.set_step(spec["job_id"], 1, "Downloading videos from your Google Drive (rclone)…", 3)
+        # Only pull VIDEO files — skips the tool's own SRT_Files/Screenplays
+        # outputs and any promo/original subfolders that share the parent folder.
         cmd = ["rclone", "copy", f"{remote}:", str(vids_dir),
                "--drive-root-folder-id", fid, "--transfers", "4",
-               "--drive-acknowledge-abuse", "--ignore-existing"]
+               "--drive-acknowledge-abuse", "--ignore-existing",
+               "--include", "*.{mp4,mkv,mov,webm,avi,MP4,MKV,MOV,WEBM,AVI}"]
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise RuntimeError(
