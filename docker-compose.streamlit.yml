@@ -2,8 +2,11 @@
 # own machine via Docker.
 #
 #   1. Put your key in a .env file next to this one:   GEMINI_API_KEY=your-key
-#   2. docker compose -f docker-compose.streamlit.yml up --build
-#   3. open http://localhost:8501
+#   2. (for PRIVATE Drive folders) configure rclone ONCE on your Mac:
+#          rclone config    → new remote named "gdrive", type "drive", sign in
+#      Its config is auto-mounted below so the container uses YOUR Google account.
+#   3. docker compose -f docker-compose.streamlit.yml up --build
+#   4. open http://localhost:8501
 #
 # The named volume persists jobs/results across restarts so the "My Jobs" tab and
 # downloads survive `docker compose down`.
@@ -17,13 +20,16 @@ services:
       - "8501:8501"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-pro}
-      - ENRICH_MODEL=${ENRICH_MODEL:-gemini-1.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      - ENRICH_MODEL=${ENRICH_MODEL:-gemini-2.0-flash}
       - ENRICH_CONCURRENCY=${ENRICH_CONCURRENCY:-4}
       - OCR_USE_GPU=false          # set true only on a CUDA host
       - WORK_ROOT=/tmp/adaptation_jobs
     volumes:
       - adaptation_jobs:/tmp/adaptation_jobs
+      # Mount your host rclone config so the container downloads PRIVATE Drive
+      # folders as YOUR Google account. Safe if the folder doesn't exist yet.
+      - ${HOME}/.config/rclone:/root/.config/rclone
     restart: unless-stopped
 
 volumes:

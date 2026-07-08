@@ -94,6 +94,35 @@ def build_source(spec: dict, wd: Path, fs=None):
         source = LocalSource(vids_dir, wd / "_local_out")
         return source, str(vids_dir), spec.get("title") or "Uploaded Show"
 
+    if spec["source"] == "rclone":
+        # Download a PRIVATE Drive folder using the scriptwriter's OWN Google
+        # account via rclone. rclone is pre-configured once on the host
+        # (`rclone config`, browser OAuth) and its config is mounted into the
+        # container — no public sharing, no Drive-API setup.
+        import subprocess
+        from app.drive import folder_id_from_url
+        fid = folder_id_from_url(spec["drive_url"])
+        remote = (spec.get("rclone_remote") or "gdrive").rstrip(":")
+        vids_dir = wd / "_rclone_videos"
+        vids_dir.mkdir(parents=True, exist_ok=True)
+        if fs:
+            fs.set_step(spec["job_id"], 1, "Downloading videos from your Google Drive (rclone)…", 3)
+        cmd = ["rclone", "copy", f"{remote}:", str(vids_dir),
+               "--drive-root-folder-id", fid, "--transfers", "4",
+               "--drive-acknowledge-abuse", "--ignore-existing"]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"rclone download failed. Is the '{remote}' remote configured on the host "
+                f"(run `rclone config`) and mounted into the container? "
+                f"Details: {(proc.stderr or proc.stdout)[-600:]}")
+        vids = [p for p in vids_dir.rglob("*") if p.is_file()]
+        if not vids:
+            raise RuntimeError("rclone connected but found no files in that folder — check the "
+                               "folder link and that your Google account has access to it.")
+        source = LocalSource(vids_dir, wd / "_local_out")
+        return source, str(vids[0].parent), (spec.get("title") or "Drive Show")
+
     if spec["source"] == "gdrive_link":
         # Download a PUBLIC ("anyone with the link") Drive folder with gdown —
         # no API key / OAuth / service account. Then treat it like local files.

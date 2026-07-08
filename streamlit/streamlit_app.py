@@ -330,16 +330,27 @@ with tab_pipe:
             "screenplay/evaluation steps work fine here."
         )
 
-    src_mode = st.radio("Video source", ["Upload video files", "Google Drive link"], horizontal=True)
+    src_mode = st.radio("Video source",
+                        ["Upload video files", "Google Drive — my account (rclone)",
+                         "Google Drive — public link"],
+                        horizontal=True)
     videos = drive_url = None
+    rclone_remote = "gdrive"
     if src_mode == "Upload video files":
         videos = st.file_uploader("Episode videos (.mp4/.mkv/.mov)",
                                   type=["mp4", "mkv", "mov", "webm", "avi"], accept_multiple_files=True)
+    elif src_mode == "Google Drive — my account (rclone)":
+        drive_url = st.text_input("Google Drive folder link (private is fine)")
+        rclone_remote = st.text_input("rclone remote name", value="gdrive")
+        st.caption("🔒 Downloads a **private** folder using **your own Google account** — no public "
+                   "sharing. One-time setup on the host: run `rclone config` → new remote named "
+                   "**gdrive**, type **drive**, sign in with your Google account. The tool then "
+                   "accesses only folders your account can see. (No Google Cloud / Drive-API setup "
+                   "needed — rclone handles the sign-in.)")
     else:
         drive_url = st.text_input("Google Drive folder link")
-        st.caption("📎 Share the folder as **‘Anyone with the link’** (Share → General access → "
-                   "Anyone with the link). No Google sign-in, API key, or JSON needed — the app "
-                   "just downloads the videos from the link.")
+        st.caption("📎 For folders shared as **‘Anyone with the link’** only. For private folders "
+                   "use the **my account (rclone)** option above.")
 
     c1, c2 = st.columns(2)
     p_title = c1.text_input("Show title (optional)")
@@ -354,8 +365,8 @@ with tab_pipe:
             errs.append("Upload the Hindi OG script.")
         if src_mode == "Upload video files" and not videos:
             errs.append("Upload at least one video file.")
-        if src_mode == "Google Drive link" and not drive_url:
-            errs.append("Paste the shared Google Drive folder link.")
+        if src_mode != "Upload video files" and not drive_url:
+            errs.append("Paste the Google Drive folder link.")
         if errs:
             for e in errs:
                 st.error(e)
@@ -371,6 +382,8 @@ with tab_pipe:
                 for v in videos:
                     save_upload(v, vids_dir / v.name)
                 spec.update(source="local", videos_dir=str(vids_dir))
+            elif src_mode == "Google Drive — my account (rclone)":
+                spec.update(source="rclone", drive_url=drive_url, rclone_remote=rclone_remote)
             else:
                 spec.update(source="gdrive_link", drive_url=drive_url)
 

@@ -184,10 +184,27 @@ with `--gpus all`, and enable **Use GPU for OCR** in the sidebar.
 | Use GPU for OCR | sidebar | enable only on a CUDA host |
 | Service-account JSON | uploaded in Drive mode | Drive read/write |
 
-**Drive mode setup:** create a service account, enable the **Google Drive API**,
-download its JSON key, and **share your video folder with the service account's
-`client_email`** so it can read the videos and create `SRT_Files/` +
-`Screenplays/`.
+### Accessing PRIVATE Drive folders (your own Google account, via rclone)
+Scriptwriters' video folders are usually **private** (not shared publicly). The
+app downloads them using **your own Google account** through **rclone** — no
+public sharing, and **no Google Cloud / Drive-API setup** (rclone has its own
+sign-in). One-time setup on the machine running Docker:
+
+```bash
+rclone config
+#  n) New remote  →  name> gdrive  →  Storage> drive
+#  client_id/secret> (leave blank — rclone's built-in)  →  scope> 1
+#  … a browser opens → sign in with your Google account → Allow
+#  q) Quit
+rclone lsd gdrive:      # verify — lists your Drive folders
+```
+
+`docker-compose.streamlit.yml` mounts `~/.config/rclone` into the container, so
+the app uses that `gdrive` remote. In the UI pick **“Google Drive — my account
+(rclone)”**, paste the (private) folder link, and it downloads via your account.
+
+Other sources: **Upload video files** (no Drive at all) or **public link**
+(gdown, only for “Anyone with the link” folders).
 
 ---
 
