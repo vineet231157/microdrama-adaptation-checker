@@ -17,7 +17,8 @@ google-auth-httplib2==0.2.0
 google-generativeai==0.8.3
 tenacity==9.0.0
 # Pin grpc/protobuf so pip doesn't backtrack for hours resolving them.
-protobuf==4.25.5
+# protobuf 5.28.3 satisfies grpcio-status>=5.26.1, streamlit<6, google<6.
+protobuf==5.28.3
 grpcio==1.68.1
 grpcio-status==1.68.1
 
