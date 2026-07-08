@@ -182,10 +182,30 @@ def run(task_id: str, hindi_script_path: str, english_master_text: str,
     report_pdf = workdir / "Adaptation_Report.pdf"
     render_report_pdf(data, report_pdf, show_title)
 
+    # Annotated Hindi Script (.docx): the Hindi OG script returned VERBATIM with a
+    # grey "ADAPTATION CHANGES" box + a red "MISSING INFORMATION" box per episode.
+    annotated_docx = workdir / "Annotated_Hindi_Script.docx"
+    try:
+        from . import annotate_hindi
+        hindi_ann = {
+            int(e["hindi_episode"]): {
+                "added": e.get("added") or [], "gaps": e.get("gaps") or [],
+                "changes": e.get("changes") or [],
+            }
+            for e in (data.get("hindi_episodes") or []) if "hindi_episode" in e
+        }
+        annotate_hindi.build(hindi_text, str(annotated_docx),
+                             title=f"{show_title} — Annotated Hindi Script", hindi_ann=hindi_ann)
+        state.log(task_id, f"Annotated Hindi script written ({len(hindi_ann)} episode(s) flagged).")
+    except Exception as e:
+        annotated_docx = None
+        state.log(task_id, f"Annotated Hindi script skipped ({e}).", level="error")
+
     state.log(
         task_id,
         f"Step 5 complete — verdict {data.get('overall_verdict')}, "
         f"score {data.get('overall_score')}/100, "
         f"{len(data.get('information_gaps', []))} genuine gap(s).",
     )
-    return {"report_pdf": report_pdf, "report_json": report_json, "data": data}
+    return {"report_pdf": report_pdf, "report_json": report_json,
+            "annotated_docx": annotated_docx, "data": data}

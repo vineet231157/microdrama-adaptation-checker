@@ -149,6 +149,10 @@ STEP D — List GENUINE information gaps only (strict per 3A). If none, return a
 STEP E — Go episode-by-episode over the SOURCE episodes: what the Hindi added, any genuine gap, other
 adaptation changes, and a one-line freeze/hook comparison.
 
+STEP F — Fill "hindi_episodes": for EVERY Hindi episode number (the Hindi usually has MORE episodes
+than the source), give its `added`, `gaps` (strict — usually empty), and `changes`. This drives the
+Annotated Hindi Script, so cover every Hindi episode present in the Hindi text.
+
 Return ONLY the JSON object.
 
 ===== AI-GENERATED ENGLISH MASTER SCREENPLAY (source of truth) =====
@@ -310,6 +314,23 @@ EVAL_SCHEMA = {
                     "freeze": {"type": "string"},
                 },
                 "required": ["source_episode", "freeze"],
+            },
+        },
+        "hindi_episodes": {
+            "type": "array",
+            "description": "Per-HINDI-episode annotations used to build the Annotated Hindi Script. "
+                           "One entry per Hindi episode number (the Hindi usually has MORE episodes "
+                           "than the source). added=what the Hindi added; gaps=genuine missing info "
+                           "(strict, usually empty); changes=other adaptation changes.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "hindi_episode": {"type": "integer"},
+                    "added": {"type": "array", "items": {"type": "string"}},
+                    "gaps": {"type": "array", "items": {"type": "string"}},
+                    "changes": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["hindi_episode"],
             },
         },
         "recommendations": {"type": "array", "items": {"type": "string"}},
