@@ -117,16 +117,16 @@ def pipeline_task(self, task_id: str, drive_url: str, access_token: str,
         # ── STEP 5 — Adaptation evaluation ─────────────────────────────────
         s5 = step5_evaluate.run(task_id, hindi_script_path, s4["corrected_text"], wd, title)
         drive.upload(s5["report_pdf"], s5["report_pdf"].name, s2["folder_id"], "application/pdf")
-        if s5.get("annotated_docx"):
-            drive.upload(s5["annotated_docx"], Path(s5["annotated_docx"]).name, s2["folder_id"],
-                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        if s5.get("annotated_pdf"):
+            drive.upload(s5["annotated_pdf"], Path(s5["annotated_pdf"]).name, s2["folder_id"],
+                         "application/pdf")
 
         # ── Final bundle ───────────────────────────────────────────────────
         state.set_step(task_id, 5, "Packaging final deliverables…", 96)
         final_zip = wd / "Final_Deliverables.zip"
         final_files = [s4["master_pdf"], s4["report_md"], s5["report_pdf"], s5["report_json"]]
-        if s5.get("annotated_docx"):
-            final_files.insert(0, s5["annotated_docx"])
+        if s5.get("annotated_pdf"):
+            final_files.insert(0, s5["annotated_pdf"])
         zip_files(final_files, final_zip)
         state.add_artifact(task_id, "final_zip",
                            f"{settings.PUBLIC_BASE_URL}/api/download/{task_id}/final")

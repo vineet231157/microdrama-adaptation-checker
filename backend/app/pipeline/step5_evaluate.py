@@ -182,23 +182,24 @@ def run(task_id: str, hindi_script_path: str, english_master_text: str,
     report_pdf = workdir / "Adaptation_Report.pdf"
     render_report_pdf(data, report_pdf, show_title)
 
-    # Annotated Hindi Script (.docx): the Hindi OG script returned VERBATIM with a
-    # grey "ADAPTATION CHANGES" box + a red "MISSING INFORMATION" box per episode.
-    annotated_docx = workdir / "Annotated_Hindi_Script.docx"
+    # Annotated Hindi Script (PDF): the Hindi OG script returned VERBATIM with a grey
+    # "ADAPTATION CHANGES" box + red "MISSING INFORMATION" box per episode, and the
+    # actual ADDED passages highlighted green inline.
+    annotated_pdf = workdir / "Annotated_Hindi_Script.pdf"
     try:
         from . import annotate_hindi
         hindi_ann = {
             int(e["hindi_episode"]): {
-                "added": e.get("added") or [], "gaps": e.get("gaps") or [],
-                "changes": e.get("changes") or [],
+                "added": e.get("added") or [], "added_spans": e.get("added_spans") or [],
+                "gaps": e.get("gaps") or [], "changes": e.get("changes") or [],
             }
             for e in (data.get("hindi_episodes") or []) if "hindi_episode" in e
         }
-        annotate_hindi.build(hindi_text, str(annotated_docx),
+        annotate_hindi.build(hindi_text, str(annotated_pdf),
                              title=f"{show_title} — Annotated Hindi Script", hindi_ann=hindi_ann)
-        state.log(task_id, f"Annotated Hindi script written ({len(hindi_ann)} episode(s) flagged).")
+        state.log(task_id, f"Annotated Hindi script (PDF) written ({len(hindi_ann)} episode(s) flagged).")
     except Exception as e:
-        annotated_docx = None
+        annotated_pdf = None
         state.log(task_id, f"Annotated Hindi script skipped ({e}).", level="error")
 
     state.log(
@@ -208,4 +209,4 @@ def run(task_id: str, hindi_script_path: str, english_master_text: str,
         f"{len(data.get('information_gaps', []))} genuine gap(s).",
     )
     return {"report_pdf": report_pdf, "report_json": report_json,
-            "annotated_docx": annotated_docx, "data": data}
+            "annotated_pdf": annotated_pdf, "data": data}

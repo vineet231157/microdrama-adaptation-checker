@@ -145,14 +145,14 @@ def run(spec: dict, wd: Path, fs: FileState):
     source.upload(s4["master_pdf"], s4["master_pdf"].name, s2["folder_id"], "application/pdf")
     s5 = step5_evaluate.run(task_id, spec["hindi_path"], s4["corrected_text"], wd, title)
     source.upload(s5["report_pdf"], s5["report_pdf"].name, s2["folder_id"], "application/pdf")
-    if s5.get("annotated_docx"):
-        source.upload(s5["annotated_docx"], Path(s5["annotated_docx"]).name,
-                      s2["folder_id"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    if s5.get("annotated_pdf"):
+        source.upload(s5["annotated_pdf"], Path(s5["annotated_pdf"]).name,
+                      s2["folder_id"], "application/pdf")
 
     fs.set_step(task_id, 5, "Packaging final deliverables…", 96)
     final_files = [s4["master_pdf"], s4["report_md"], s5["report_pdf"], s5["report_json"]]
-    if s5.get("annotated_docx"):
-        final_files.insert(0, s5["annotated_docx"])   # the annotated Hindi script first
+    if s5.get("annotated_pdf"):
+        final_files.insert(0, s5["annotated_pdf"])   # the annotated Hindi script first
     zip_files(final_files, wd / "Final_Deliverables.zip")
     fs.add_artifact(task_id, "final_zip", "Final_Deliverables.zip")
     fs.finish(task_id)

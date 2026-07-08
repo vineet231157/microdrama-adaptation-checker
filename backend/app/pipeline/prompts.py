@@ -150,8 +150,12 @@ STEP E — Go episode-by-episode over the SOURCE episodes: what the Hindi added,
 adaptation changes, and a one-line freeze/hook comparison.
 
 STEP F — Fill "hindi_episodes": for EVERY Hindi episode number (the Hindi usually has MORE episodes
-than the source), give its `added`, `gaps` (strict — usually empty), and `changes`. This drives the
-Annotated Hindi Script, so cover every Hindi episode present in the Hindi text.
+than the source), give its `added`, `added_spans`, `gaps` (strict — usually empty), and `changes`.
+CRUCIAL: `added_spans` must be EXACT VERBATIM substrings copied from the Hindi script — the actual
+added lines/beats/details that are NOT in the original AND that add information (new context, a new
+moment, extra motivation). Do NOT put translated dialogue in `added_spans` (a Hindi line that just
+translates a source line is NOT an addition). These spans are highlighted in green in the Annotated
+Hindi Script, so they must match the Hindi text character-for-character. Cover every Hindi episode.
 
 Return ONLY the JSON object.
 
@@ -327,6 +331,16 @@ EVAL_SCHEMA = {
                 "properties": {
                     "hindi_episode": {"type": "integer"},
                     "added": {"type": "array", "items": {"type": "string"}},
+                    "added_spans": {
+                        "type": "array",
+                        "description": "VERBATIM snippets copied EXACTLY from the Hindi script that are "
+                                       "ADDED content (a beat/line/detail present in the Hindi but NOT "
+                                       "in the original) and that ADD INFORMATION. Must be exact "
+                                       "substrings of the Hindi text so they can be highlighted. Do "
+                                       "NOT include lines that are merely Hindi translations of "
+                                       "existing source dialogue.",
+                        "items": {"type": "string"},
+                    },
                     "gaps": {"type": "array", "items": {"type": "string"}},
                     "changes": {"type": "array", "items": {"type": "string"}},
                 },

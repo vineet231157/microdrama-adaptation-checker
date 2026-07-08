@@ -1,24 +1,99 @@
-"""Annotated Hindi Script (.docx) — the Hindi OG screenplay reproduced verbatim
-with two boxes at the top of every episode:
+"""Annotated Hindi Script (PDF) — the Hindi OG screenplay reproduced verbatim with:
 
-  • ADAPTATION CHANGES  (grey box)  — what the Hindi did differently, incl. anything added
-  • MISSING INFORMATION (red box)   — genuine story info a viewer never receives
+  • a grey  ADAPTATION CHANGES  box  at the top of each episode (what the Hindi did differently)
+  • a red   MISSING INFORMATION box  at the top of each episode (genuine story info never received)
+  • GREEN INLINE HIGHLIGHT of the actual passages ADDED in the Hindi that aren't in the original
+    (substantive additions that add information — NOT translated dialogue). No green box — the
+    added text itself is highlighted where it appears in the script.
 
-Python-docx port of the original build_script.js. Boxes are shaded + bordered
-via oxml (python-docx has no direct paragraph shading/border API).
+Rendered with reportlab.
 """
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-NAVY, GREY, DGREY, RED = "1F3864", "666666", "555555", "B22222"
-GREY_FILL, RED_FILL = "F0F0F0", "FDECEA"
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                TableStyle, KeepTogether)
+from reportlab.lib.styles import ParagraphStyle
+
+NAVY = colors.HexColor("#1F3864")
+GREY = colors.HexColor("#555555")
+RED = colors.HexColor("#B22222")
+GREY_FILL = colors.HexColor("#F0F0F0")
+RED_FILL = colors.HexColor("#FDECEA")
+GREEN_HL = "#C6F6D5"          # inline highlight for added content
 
 _SLUG = re.compile(r"^(Scene\s+\d+[^/]*/\s*)?(INT\.|EXT\.|INT\./EXT\.|MONTAGE)", re.I)
 _SLUG2 = re.compile(r"^\d+(-\d+)?\s*/\s*(INT|EXT|MONTAGE)", re.I)
 _EP = re.compile(r"^EPISODE\s+(\d+)\b", re.I)
 _EP2 = re.compile(r"^EP\s*0?(\d+)\b", re.I)
+
+S = {
+    "title": ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=17, textColor=NAVY, spaceAfter=4, leading=21),
+    "sub": ParagraphStyle("s", fontName="Helvetica", fontSize=10.5, textColor=GREY, spaceAfter=8, leading=14),
+    "legend": ParagraphStyle("lg", fontName="Helvetica", fontSize=9.5, leading=14, spaceAfter=2, leftIndent=8),
+    "ep": ParagraphStyle("ep", fontName="Helvetica-Bold", fontSize=14, textColor=NAVY, spaceBefore=6, spaceAfter=8, leading=17),
+    "boxlabel": ParagraphStyle("bl", fontName="Helvetica-Bold", fontSize=9, leading=12, spaceAfter=2),
+    "boxitem": ParagraphStyle("bi", fontName="Helvetica", fontSize=8.5, leading=11.5, leftIndent=6, textColor=colors.HexColor("#222222")),
+    "slug": ParagraphStyle("sl", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY, spaceBefore=8, spaceAfter=3, leading=14),
+    "note": ParagraphStyle("nt", fontName="Helvetica-Oblique", fontSize=9, textColor=GREY, leftIndent=8, leading=12, spaceAfter=2),
+    "cue": ParagraphStyle("cue", fontName="Helvetica-Bold", fontSize=10, leftIndent=1.7 * inch, spaceBefore=4, leading=12),
+    "body": ParagraphStyle("bd", fontName="Helvetica", fontSize=10, leading=13.5, spaceAfter=4),
+}
+
+
+def esc(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _highlight(raw: str, spans: list[str]) -> str:
+    """Return reportlab markup: `raw` escaped, with any `spans` wrapped in a green
+    background. Matches are case-insensitive, non-overlapping, longest-first."""
+    spans = [s for s in (spans or []) if s and len(s.strip()) >= 4]
+    if not spans:
+        return esc(raw)
+    low = raw.lower()
+    ranges: list[tuple[int, int]] = []
+    for sp in sorted(set(spans), key=len, reverse=True):
+        needle = sp.lower().strip()
+        start = 0
+        while True:
+            i = low.find(needle, start)
+            if i < 0:
+                break
+            j = i + len(needle)
+            if not any(a < j and i < b for a, b in ranges):
+                ranges.append((i, j))
+            start = j
+    if not ranges:
+        return esc(raw)
+    ranges.sort()
+    out, pos = [], 0
+    for a, b in ranges:
+        if a < pos:
+            continue
+        out.append(esc(raw[pos:a]))
+        out.append(f'<font backColor="{GREEN_HL}">' + esc(raw[a:b]) + "</font>")
+        pos = b
+    out.append(esc(raw[pos:]))
+    return "".join(out)
+
+
+def _box(label: str, label_hex: str, fill, items: list[str]):
+    rows = [Paragraph(f'<font color="{label_hex}"><b>{esc(label)}</b></font>', S["boxlabel"])]
+    for it in items:
+        rows.append(Paragraph("•  " + esc(it), S["boxitem"]))
+    tbl = Table([[rows]], colWidths=[6.2 * inch])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), fill),
+        ("BOX", (0, 0), (-1, -1), 0.75, colors.HexColor(label_hex)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return KeepTogether(tbl)
 
 
 def _is_slug(l: str) -> bool:
@@ -41,116 +116,45 @@ def _starts_lower(l: str) -> bool:
     return bool(re.match(r"^[a-z'\"“(]", l))
 
 
-# ── oxml shading + border helpers ────────────────────────────────────────────
-def _shade(paragraph, fill):
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    pPr = paragraph._p.get_or_add_pPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:fill"), fill)
-    pPr.append(shd)
-
-
-def _borders(paragraph, color, top=False, bottom=False, left=True, right=True):
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    pPr = paragraph._p.get_or_add_pPr()
-    pBdr = OxmlElement("w:pBdr")
-    for edge, on in (("top", top), ("bottom", bottom), ("left", left), ("right", right)):
-        if on:
-            e = OxmlElement(f"w:{edge}")
-            e.set(qn("w:val"), "single")
-            e.set(qn("w:sz"), "6")
-            e.set(qn("w:space"), "2")
-            e.set(qn("w:color"), color)
-            pBdr.append(e)
-    pPr.append(pBdr)
-
-
-def _run(p, text, *, size=10, bold=False, italic=False, color=None):
-    from docx.shared import Pt, RGBColor
-    r = p.add_run(text)
-    r.font.size = Pt(size)
-    r.bold = bold
-    r.italic = italic
-    if color:
-        r.font.color.rgb = RGBColor.from_string(color)
-    return r
-
-
-def _box(doc, label, label_color, fill, items):
-    from docx.shared import Pt
-    # header
-    h = doc.add_paragraph()
-    h.paragraph_format.left_indent = Pt(6)
-    h.paragraph_format.right_indent = Pt(6)
-    h.paragraph_format.space_after = Pt(1)
-    _shade(h, fill)
-    _borders(h, label_color, top=True, left=True, right=True)
-    _run(h, label, size=9, bold=True, color=label_color)
-    # bullets
-    for i, it in enumerate(items):
-        last = i == len(items) - 1
-        b = doc.add_paragraph()
-        b.paragraph_format.left_indent = Pt(15)
-        b.paragraph_format.right_indent = Pt(6)
-        b.paragraph_format.space_after = Pt(0 if last else 2)
-        _shade(b, fill)
-        _borders(b, label_color, bottom=last, left=True, right=True)
-        _run(b, "•  " + it, size=8.5, color="222222")
-
-
-def build(hindi_text: str, out_docx: str, *, title: str, hindi_ann: dict[int, dict]) -> str:
-    """hindi_ann: {episode_number: {'added':[], 'gaps':[], 'changes':[]}}."""
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-
-    doc = Document()
-    doc.styles["Normal"].font.name = "Arial"
-    doc.styles["Normal"].font.size = Pt(10)
-
-    # title + legend
-    t = doc.add_paragraph(); _run(t, title, size=17, bold=True, color=NAVY)
-    s = doc.add_paragraph(); _run(s, "Annotated Hindi Script — adaptation changes & missing "
-                                    "information flagged per episode (dialogue verbatim).",
-                                  size=11, color=GREY)
-    leg = doc.add_paragraph(); _run(leg, "HOW TO READ THIS DOCUMENT", size=10, bold=True, color=NAVY)
-    l1 = doc.add_paragraph()
-    _run(l1, "•  "); _run(l1, "ADAPTATION CHANGES", bold=True, color=DGREY)
-    _run(l1, " (grey box) — everything the Hindi did differently, including anything it added.")
-    l2 = doc.add_paragraph()
-    _run(l2, "•  "); _run(l2, "MISSING INFORMATION", bold=True, color=RED)
-    _run(l2, " (red box) — genuine story info a viewer never receives; says so if nothing is missing.")
+def build(hindi_text: str, out_pdf: str, *, title: str, hindi_ann: dict[int, dict]) -> str:
+    """hindi_ann: {episode: {'added_spans':[], 'gaps':[], 'changes':[]}}."""
+    flow = [
+        Paragraph(esc(title), S["title"]),
+        Paragraph("Annotated Hindi Script — dialogue verbatim; adaptation notes per episode.", S["sub"]),
+        Paragraph("<b>HOW TO READ THIS DOCUMENT</b>", S["legend"]),
+        Paragraph('•  <font color="#555555"><b>ADAPTATION CHANGES</b></font> (grey box) — what the '
+                  "Hindi did differently.", S["legend"]),
+        Paragraph('•  <font color="#B22222"><b>MISSING INFORMATION</b></font> (red box) — genuine '
+                  "story info a viewer never receives.", S["legend"]),
+        Paragraph(f'•  <font backColor="{GREEN_HL}"><b>Green highlight</b></font> — content ADDED in '
+                  "the Hindi that isn't in the original (not translated dialogue).", S["legend"]),
+        Spacer(1, 8),
+    ]
 
     lines = [ln.rstrip() for ln in hindi_text.split("\n")]
     started = False
     buf: list[str] = []
+    cur_spans: list[str] = []
 
     def flush():
         nonlocal buf
         if buf:
-            para = doc.add_paragraph()
-            _run(para, " ".join(buf).strip(), size=10)
+            flow.append(Paragraph(_highlight(" ".join(buf).strip(), cur_spans), S["body"]))
             buf = []
 
     def start_episode(n: int):
-        nonlocal started
+        nonlocal started, cur_spans
         flush()
-        if started:
-            doc.add_page_break()
         started = True
-        hp = doc.add_heading(f"Episode {n} (Hindi)", level=1)
-        for r in hp.runs:
-            r.font.color.rgb = RGBColor.from_string(NAVY)
         a = hindi_ann.get(n, {})
-        change_list = ["Added — " + x for x in (a.get("added") or [])] + (a.get("changes") or [])
-        _box(doc, "ADAPTATION CHANGES", DGREY, GREY_FILL,
-             change_list or ["No notable changes."])
-        doc.add_paragraph()
-        _box(doc, "MISSING INFORMATION", RED, RED_FILL,
-             (a.get("gaps") or ["None — no information missing."]))
-        doc.add_paragraph()
+        cur_spans = a.get("added_spans") or []
+        flow.append(Paragraph(f"Episode {n} (Hindi)", S["ep"]))
+        flow.append(_box("ADAPTATION CHANGES", "#555555", GREY_FILL,
+                         (a.get("changes") or []) or ["No notable changes."]))
+        flow.append(Spacer(1, 4))
+        flow.append(_box("MISSING INFORMATION", "#B22222", RED_FILL,
+                         (a.get("gaps") or ["None — no information missing."])))
+        flow.append(Spacer(1, 6))
 
     for raw in lines:
         l = raw.strip()
@@ -163,31 +167,24 @@ def build(hindi_text: str, out_docx: str, *, title: str, hindi_ann: dict[int, di
         if re.match(r"^SCENE PROFILE$", l, re.I):
             flush(); continue
         if _is_slug(l):
-            flush()
-            p = doc.add_paragraph(); _run(p, l, size=10.5, bold=True, color=NAVY)
-            continue
+            flush(); flow.append(Paragraph(esc(l), S["slug"])); continue
         if re.match(r"^SETTING:", l, re.I) or l.startswith("•"):
-            flush()
-            p = doc.add_paragraph(); p.paragraph_format.left_indent = Pt(8)
-            _run(p, l, size=9, italic=True, color=GREY)
-            continue
+            flush(); flow.append(Paragraph(_highlight(l, cur_spans), S["note"])); continue
         if _is_cue(l):
-            flush()
-            p = doc.add_paragraph(); p.paragraph_format.left_indent = Pt(120)
-            _run(p, l, size=10, bold=True)
-            continue
+            flush(); flow.append(Paragraph(esc(l), S["cue"])); continue
         if buf and _starts_lower(l):
             buf.append(l)
         else:
             flush(); buf = [l]
     flush()
 
-    # If the Hindi text had NO episode markers, still surface annotations up top.
+    # No episode markers in the Hindi text → still surface annotations + highlight.
     if not started and hindi_ann:
         for n in sorted(hindi_ann):
             start_episode(n)
-        doc.add_paragraph()
-        _run(doc.add_paragraph(), hindi_text[:20000], size=10)
+        flow.append(Paragraph(_highlight(hindi_text[:20000],
+                    [s for a in hindi_ann.values() for s in (a.get("added_spans") or [])]), S["body"]))
 
-    doc.save(out_docx)
-    return out_docx
+    SimpleDocTemplate(out_pdf, pagesize=A4, leftMargin=0.9 * inch, rightMargin=0.9 * inch,
+                      topMargin=0.9 * inch, bottomMargin=0.8 * inch, title=title).build(flow)
+    return out_pdf
