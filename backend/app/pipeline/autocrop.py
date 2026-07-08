@@ -74,18 +74,43 @@ def _sample_frame_indices(total: int, n: int) -> list[int]:
     return [int(lo + step * i) for i in range(n)]
 
 
+def _box_points(item):
+    """Extract the 4-point polygon from a PaddleOCR result entry, tolerant of the
+    different shapes different PaddleOCR versions return:
+      • detection-only:  item == [[x,y],[x,y],[x,y],[x,y]]
+      • det+rec:          item == [ [[x,y]*4], (text, conf) ]
+    Returns an (N,2) float array, or None if it can't be parsed.
+    """
+    cand = item
+    # det+rec pair → take the polygon half
+    if (isinstance(item, (list, tuple)) and len(item) == 2
+            and isinstance(item[0], (list, tuple))
+            and isinstance(item[1], (list, tuple))):
+        cand = item[0]
+    try:
+        pts = np.array(cand, dtype=float)
+    except Exception:
+        return None
+    if pts.ndim == 1 and pts.size % 2 == 0:
+        pts = pts.reshape(-1, 2)
+    if pts.ndim != 2 or pts.shape[1] != 2 or pts.shape[0] < 2:
+        return None
+    return pts
+
+
 def _detect_boxes_paddle(band_bgr) -> list[tuple[int, int, int, int]]:
-    """Return (x1,y1,x2,y2) boxes in band-local coords using PaddleOCR detection."""
+    """Return (x1,y1,x2,y2) text boxes in band-local coords via PaddleOCR."""
     det = _get_paddle_detector()
-    # rec=False → detection only (fast, no recognition step)
-    result = det.ocr(band_bgr, det=True, rec=False, cls=False)
+    result = det.ocr(band_bgr, cls=False)     # default call — robust format across versions
     boxes: list[tuple[int, int, int, int]] = []
     if not result:
         return boxes
-    # PaddleOCR returns a nested list; each entry is a 4-point polygon.
-    polys = result[0] if result and isinstance(result[0], list) else result
-    for poly in polys or []:
-        pts = np.array(poly).reshape(-1, 2)
+    page = result[0] if (isinstance(result, (list, tuple)) and result
+                         and isinstance(result[0], (list, tuple))) else result
+    for item in page or []:
+        pts = _box_points(item)
+        if pts is None:
+            continue
         x1, y1 = pts[:, 0].min(), pts[:, 1].min()
         x2, y2 = pts[:, 0].max(), pts[:, 1].max()
         boxes.append((int(x1), int(y1), int(x2), int(y2)))
