@@ -351,3 +351,107 @@ EVAL_SCHEMA = {
     },
     "required": ["overall_verdict", "overall_score", "summary", "parameters", "information_gaps"],
 }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RIGOROUS per-episode evaluation (chunked so the JSON never truncates AND the
+# model reasons deeply about ONE episode at a time against the full source).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Series-level pass — small JSON: verdict, Bible table, character map, series lists.
+SERIES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overall_verdict": {"type": "string"},
+        "overall_score": {"type": "integer"},
+        "summary": {"type": "string"},
+        "character_world_map": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "source": {"type": "string"}, "hindi": {"type": "string"}, "note": {"type": "string"}},
+                "required": ["source", "hindi"]},
+        },
+        "parameters": {
+            "type": "array",
+            "items": {"type": "object", "properties": {
+                "code": {"type": "string"}, "verdict": {"type": "string"},
+                "note": {"type": "string"}, "examples": {"type": "array", "items": {"type": "string"}}},
+                "required": ["code", "verdict", "note"]},
+        },
+        "information_gaps": {"type": "array", "items": {"type": "string"}},
+        "adaptation_changes": {"type": "array", "items": {"type": "string"}},
+        "recommendations": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["overall_verdict", "overall_score", "summary", "parameters", "information_gaps"],
+}
+
+# Per-episode pass — small JSON for ONE Hindi episode.
+EPISODE_EVAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "maps_to": {"type": "string", "description": "Which source episode(s) this Hindi episode covers."},
+        "added": {"type": "array", "items": {"type": "string"},
+                  "description": "Short descriptions of what the Hindi ADDED (not in the source)."},
+        "added_spans": {"type": "array", "items": {"type": "string"},
+                        "description": "VERBATIM substrings copied EXACTLY from THIS Hindi episode that "
+                                       "are ADDED content (present in Hindi, absent in the source) and "
+                                       "ADD INFORMATION. NOT translated dialogue. Must match the text."},
+        "gaps": {"type": "array", "items": {"type": "string"},
+                 "description": "GENUINE information gaps only (strict): a plot point / motivation / "
+                                "narrative fact in the source that a Hindi viewer NEVER receives. "
+                                "Empty if none."},
+        "changes": {"type": "array", "items": {"type": "string"},
+                    "description": "Other adaptation changes (tone, structure, localisation, freeze, "
+                                   "compression, softening) — NOT gaps, NOT additions."},
+        "freeze": {"type": "string", "description": "One-line freeze/hook comparison vs the source."},
+    },
+    "required": ["freeze"],
+}
+
+
+def build_series_prompt(english_text: str, hindi_text: str, show_title: str) -> str:
+    return f"""Series-level adaptation review of "{show_title}" against the Bible. Return ONLY JSON.
+
+Give: overall_verdict + overall_score(0-100) + a 2-4 sentence summary; the Source→Hindi
+character/world map; a parameters table with a row for EACH Bible code (1A,1B,2,3A,3B,3C,3D,3E,4,5,6,7)
+each with verdict + grounded note (+ short example quotes); the SERIES-WIDE genuine information_gaps
+(strict, usually few); the SERIES-WIDE notable adaptation_changes; and recommendations.
+
+===== AI-GENERATED ENGLISH MASTER (source of truth) =====
+{english_text}
+===== END ENGLISH MASTER =====
+
+===== HUMAN-WRITTEN HINDI ADAPTATION =====
+{hindi_text}
+===== END HINDI ADAPTATION =====
+"""
+
+
+def build_episode_eval_prompt(ep_num: int, hindi_ep_text: str, english_context: str,
+                              show_title: str) -> str:
+    return f"""Rigorously review HINDI EPISODE {ep_num} of "{show_title}" against the ENGLISH MASTER
+(the faithful source of truth). Read the full English master for context, then analyse THIS Hindi
+episode line by line. Return ONLY JSON for this one episode.
+
+Find, grounded in the actual text (be specific, do not invent):
+• maps_to — which source episode(s) this Hindi episode's content corresponds to (map by STORY CONTENT,
+  not by number — the Hindi usually expands).
+• added / added_spans — everything the Hindi ADDED that is NOT in the source AND adds information
+  (a new beat, a new line that conveys new context/motivation, an added scene). added_spans must be
+  EXACT verbatim substrings from this Hindi episode. Do NOT count a Hindi line that merely TRANSLATES
+  a source line as "added".
+• gaps — GENUINE information gaps ONLY (strict): a plot point, character motivation, or narrative fact
+  present in the source that a viewer of this Hindi episode NEVER receives. A dropped line, trimmed
+  montage, changed setting, softened tone, reassigned beat, or name/currency localisation is NOT a
+  gap. Empty list if nothing is genuinely missing.
+• changes — other adaptation changes (tone, structure, freeze, compression, localisation, softening).
+• freeze — one-line comparison of this episode's end-hook/cliffhanger vs the source.
+
+===== ENGLISH MASTER (full, source of truth) =====
+{english_context}
+===== END ENGLISH MASTER =====
+
+===== HINDI EPISODE {ep_num} (under review) =====
+{hindi_ep_text}
+===== END HINDI EPISODE {ep_num} =====
+"""

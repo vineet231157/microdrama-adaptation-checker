@@ -173,13 +173,17 @@ _retry_fast = retry(
 
 @_retry_fast
 def generate_text(models: list[str], system_instruction: str, contents,
-                  *, temperature=0.5, max_output_tokens=8192) -> str:
+                  *, temperature=0.5, max_output_tokens=8192, json_schema=None) -> str:
     """Stateless generate over an ORDERED model list — SAFE for concurrent
-    (multi-thread) calls (no shared mutable state). Used for enrichment.
-    ``models`` is tried in order; unavailable models are skipped, 429s retried
-    a few times then raised (fail fast, never hang)."""
+    (multi-thread) calls (no shared mutable state). Used for enrichment + the
+    chunked adaptation evaluation. ``models`` is tried in order; unavailable
+    models are skipped, 429s retried a few times then raised (fail fast)."""
     _configure()
-    cfg = genai.types.GenerationConfig(temperature=temperature, max_output_tokens=max_output_tokens)
+    cfg_kwargs = dict(temperature=temperature, max_output_tokens=max_output_tokens)
+    if json_schema is not None:
+        cfg_kwargs["response_mime_type"] = "application/json"
+        cfg_kwargs["response_schema"] = json_schema
+    cfg = genai.types.GenerationConfig(**cfg_kwargs)
     last = None
     # resolve_chain filters to models this key actually has, then adds available
     # flash/pro as a safety net — so enrichment never dies on "model not found".

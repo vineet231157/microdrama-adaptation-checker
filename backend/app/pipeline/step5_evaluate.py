@@ -7,11 +7,37 @@ pleasing, colour-coded PDF report.
 """
 from __future__ import annotations
 
+import json
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .. import state
-from .prompts import EVAL_SCHEMA, EVAL_SYSTEM_INSTRUCTION, build_eval_prompt
+from ..config import settings
+from .prompts import (EPISODE_EVAL_SCHEMA, EVAL_SYSTEM_INSTRUCTION, SERIES_SCHEMA,
+                      build_episode_eval_prompt, build_series_prompt)
 from .textextract import extract_text
+
+
+def _safe_json(raw: str) -> dict:
+    """Parse Gemini JSON tolerantly: strip code fences, and if the tail is
+    truncated, trim to the last balanced brace so we still get usable data."""
+    s = (raw or "").strip()
+    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s).strip()
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    # repair: cut to the last closing brace and balance
+    end = s.rfind("}")
+    if end != -1:
+        frag = s[:end + 1]
+        for _ in range(6):  # try closing a few open braces/brackets
+            try:
+                return json.loads(frag)
+            except Exception:
+                frag += "}"
+    return {}
 
 # Verdict → colour (mirrors the docx report's palette).
 _VERDICT_COLOR = {
@@ -164,19 +190,71 @@ def run(task_id: str, hindi_script_path: str, english_master_text: str,
     """Returns {'report_pdf', 'report_json'}."""
     from .. import gemini  # lazy — keeps the AI SDK out of the render-only path
 
+    from . import enrich_director_ready  # reuse its episode splitter
+
     state.set_step(task_id, 5, "Evaluating the Hindi adaptation…", 82)
 
     hindi_text = extract_text(hindi_script_path)
     state.log(task_id, f"Extracted {len(hindi_text)} chars from the Hindi script.")
 
-    session = gemini.GeminiSession(EVAL_SYSTEM_INSTRUCTION)
-    prompt = build_eval_prompt(_truncate(hindi_text), _truncate(english_master_text), show_title)
-    state.log(task_id, "Running adaptation evaluation against the Bible rules…")
-    data = session.generate_json([prompt], json_schema=EVAL_SCHEMA,
-                                 temperature=0.3, max_output_tokens=8192)
+    # Prefer the configured model (pro reasons better); resolve_chain keeps only
+    # models the key actually has.
+    models = [settings.GEMINI_MODEL, *settings.GEMINI_FALLBACKS]
+    english_ctx = _truncate(english_master_text, 200_000)   # full source as context
+
+    # ── PASS 1: series-level verdict + Bible table + character map (one small call) ──
+    state.set_step(task_id, 5, "Evaluating: series overview…", 82)
+    series = _safe_json(gemini.generate_text(
+        models, EVAL_SYSTEM_INSTRUCTION,
+        [build_series_prompt(english_ctx, _truncate(hindi_text, 200_000), show_title)],
+        temperature=0.3, max_output_tokens=8192, json_schema=SERIES_SCHEMA))
+
+    # ── PASS 2: rigorous PER-EPISODE analysis (parallel, each a small JSON) ──
+    episodes = [(n, t) for (n, t) in enrich_director_ready.split_episodes(hindi_text) if t.strip()]
+    state.log(task_id, f"Evaluating {len(episodes)} Hindi episode(s) individually "
+                       f"({settings.ENRICH_CONCURRENCY} in parallel)…")
+
+    def _one_ep(item):
+        ep_num, ep_text = item
+        raw = gemini.generate_text(
+            models, EVAL_SYSTEM_INSTRUCTION,
+            [build_episode_eval_prompt(ep_num, ep_text, english_ctx, show_title)],
+            temperature=0.3, max_output_tokens=8192, json_schema=EPISODE_EVAL_SCHEMA)
+        d = _safe_json(raw)
+        d["hindi_episode"] = ep_num
+        d["source_episode"] = ep_num
+        return d
+
+    ep_results: list[dict] = [{} for _ in episodes]
+    done = 0
+    with ThreadPoolExecutor(max_workers=settings.ENRICH_CONCURRENCY) as pool:
+        futs = {pool.submit(_one_ep, ep): i for i, ep in enumerate(episodes)}
+        for fut in as_completed(futs):
+            i = futs[fut]
+            try:
+                ep_results[i] = fut.result()
+            except Exception as e:
+                ep_results[i] = {"hindi_episode": episodes[i][0], "source_episode": episodes[i][0],
+                                 "freeze": f"[evaluation failed: {e}]"}
+                state.log(task_id, f"✗ Episode {episodes[i][0]} eval failed: {e}", level="error")
+            done += 1
+            state.set_step(task_id, 5, f"Evaluating episodes ({done}/{len(episodes)})…",
+                           82 + int(done / max(len(episodes), 1) * 12))
+
+    ep_results = [e for e in ep_results if e]
+
+    # ── Assemble the combined findings object the renderers expect ──
+    data = dict(series)
+    data.setdefault("overall_verdict", "—")
+    data.setdefault("overall_score", 0)
+    data.setdefault("summary", "")
+    data["episodes"] = ep_results
+    data["hindi_episodes"] = ep_results
+    # Fold per-episode genuine gaps into the series gap list if the series pass missed them.
+    ep_gaps = [f"Ep {e.get('hindi_episode')}: {g}" for e in ep_results for g in (e.get("gaps") or [])]
+    data["information_gaps"] = (series.get("information_gaps") or []) + ep_gaps
 
     report_json = workdir / "Adaptation_Report.json"
-    import json
     report_json.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     report_pdf = workdir / "Adaptation_Report.pdf"
