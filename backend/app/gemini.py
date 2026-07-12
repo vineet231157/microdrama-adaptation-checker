@@ -44,6 +44,31 @@ def _is_unavailable(exc: Exception) -> bool:
                                 "deprecated", "unavailable", "404", "permission"))
 
 
+def _resp_text(resp) -> str:
+    """Extract text WITHOUT crashing when finish_reason != STOP.
+
+    ``resp.text`` raises if the candidate has no text part (e.g. a thinking model
+    that spent the whole budget, a SAFETY/MAX_TOKENS finish). We gather any text
+    parts defensively and return '' if there truly are none, so the caller can
+    fall back to the next model instead of the whole job dying.
+    """
+    try:
+        return resp.text or ""
+    except Exception:
+        pass
+    out = []
+    try:
+        for c in (getattr(resp, "candidates", None) or []):
+            content = getattr(c, "content", None)
+            for p in (getattr(content, "parts", None) or []):
+                t = getattr(p, "text", None)
+                if t:
+                    out.append(t)
+    except Exception:
+        pass
+    return "".join(out)
+
+
 # Exponential backoff ONLY on 429/quota errors; everything else raises fast.
 _retry = retry(
     reraise=True,
@@ -146,15 +171,19 @@ class GeminiSession:
                     name, system_instruction=self.system_instruction
                 )
                 resp = mdl.generate_content(contents, generation_config=cfg)
+                text = _resp_text(resp)
+                if not text:               # empty (MAX_TOKENS/SAFETY) → try next model
+                    log.warning("Model %s returned no text; trying next…", name)
+                    continue
                 self._model, self._model_name = mdl, name
-                return resp.text
+                return text
             except Exception as e:
                 last = e
                 if _is_unavailable(e):
                     log.warning("Model %s unavailable, trying next…", name)
                     continue
                 raise  # rate-limit errors bubble to the @_retry wrapper
-        raise RuntimeError(f"All Gemini models failed. Last error: {last}")
+        raise RuntimeError(f"All Gemini models returned no usable text. Last error: {last}")
 
     def generate_json(self, contents, *, json_schema, **kw) -> dict:
         raw = self.generate(contents, json_schema=json_schema, **kw)
@@ -190,13 +219,16 @@ def generate_text(models: list[str], system_instruction: str, contents,
     for name in resolve_chain(models):
         try:
             mdl = genai.GenerativeModel(name, system_instruction=system_instruction)
-            return mdl.generate_content(contents, generation_config=cfg).text
+            text = _resp_text(mdl.generate_content(contents, generation_config=cfg))
+            if not text:               # empty (MAX_TOKENS/SAFETY) → try next model
+                continue
+            return text
         except Exception as e:
             last = e
             if _is_unavailable(e):
                 continue
             raise  # 429s bubble to @_retry_fast
-    raise RuntimeError(f"All enrichment models failed. Last error: {last}")
+    raise RuntimeError(f"All models returned no usable text. Last error: {last}")
 
 
 # ── Video File API helpers ────────────────────────────────────────────────
