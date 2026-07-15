@@ -126,30 +126,13 @@ def is_cue(line):
     return None
 
 
-def _pdf_text_pdfplumber(path):
-    """Pure-Python PDF text extraction (no external binary)."""
-    import pdfplumber
-    with pdfplumber.open(path) as pdf:
-        return "\n".join((p.extract_text() or "") for p in pdf.pages)
-
-
 def extract_text(path):
+    """Extract text from a PDF/TXT. PDFs use pdfplumber (pure Python) — NO external
+    `pdftotext`/poppler binary, so it runs on any host (Streamlit Cloud included)."""
     if path.lower().endswith(".pdf"):
-        # Prefer `pdftotext -layout` (best layout fidelity) but DON'T require it —
-        # fall back to pdfplumber (pure Python) when the poppler binary is absent,
-        # so this works on hosts like Streamlit Cloud without extra system packages.
-        with tempfile.TemporaryDirectory() as tmp:
-            out = os.path.join(tmp, "x.txt")
-            try:
-                r = subprocess.run(["pdftotext", "-layout", path, out],
-                                   capture_output=True, text=True)
-                if r.returncode == 0:
-                    txt = open(out, encoding="utf-8", errors="ignore").read()
-                    if txt.strip():
-                        return txt
-            except FileNotFoundError:
-                pass  # poppler not installed → fall through to pdfplumber
-        return _pdf_text_pdfplumber(path)
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            return "\n".join((p.extract_text() or "") for p in pdf.pages)
     return open(path, encoding="utf-8", errors="ignore").read()
 
 
